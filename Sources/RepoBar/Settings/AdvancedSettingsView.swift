@@ -24,7 +24,7 @@ struct AdvancedSettingsView: View {
                     LaunchAtLoginHelper.set(enabled: self.session.settings.launchAtLogin)
                     self.appState.persistSettings()
                     Task { @MainActor in
-                        self.appState.refreshScheduler.configure(interval: newValue.seconds) { [weak appState] in
+                        self.appState.refreshScheduler.configure(interval: newValue.seconds) { [weak appState = self.appState] in
                             appState?.requestRefresh()
                         }
                     }
