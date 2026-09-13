@@ -6,12 +6,15 @@
 - Testing: Swift Testing (`swift test`) via `pnpm test`/`pnpm check`.
 
 ## Project Structure & Module Organization
-- `Sources/RepoBar/` holds app code: `App` (entry), `StatusBar` (menus/windows), `Auth` (PKCE + TokenStore), `API` (GitHub GraphQL/REST clients), `Models`, `Views`, `Settings`, `Support`; generated GraphQL types, if produced, live under `API/Generated` (do not hand edit).
-- `Tests/RepoBarTests/` contains Swift Testing suites; keep new coverage close to the code under test.
-- `Resources/` includes app assets/entitlements; `Scripts/` wraps all build/lint/run steps; `GraphQL/` stores schemas/operations; `docs/` has spec and release notes.
+- `Sources/RepoBarCore/` owns GitHub REST/GraphQL, authentication storage, repository models, settings, caches, reference parsing, and local Git services shared by app and CLI.
+- `Sources/RepoBar/` holds the macOS app: `App` (lifecycle and behavior extensions), `StatusBar` (AppKit menus/windows), `Auth` (UI coordinators), `Models`, `Views`, `Settings`, and `Support`.
+- `Sources/repobarcli/` holds command definitions, argument binding, and output rendering. Keep command groups in focused files.
+- `RepoBariOS/` holds the iOS app and share extension, with an explicit Xcode project and separate tests. Shared non-UI behavior belongs in `RepoBarCore`.
+- `Tests/RepoBarTests/` and `Tests/repobarcliTests/` contain Swift Testing suites. Keep coverage close to the behavior under test.
+- `Resources/` includes app assets; `Scripts/` wraps build/lint/run steps; `GraphQL/` stores schemas/operations; `docs/` has specifications and reference documentation. Optional generated GraphQL output lives under `Sources/RepoBar/API/Generated`; do not hand edit it.
 
 ## Build, Test, and Development Commands
-- Use pnpm scripts from repo root (pnpm v10+, Swift 6.2, Xcode 26): `pnpm install` once for script deps.
+- Use pnpm scripts from repo root (the package.json pnpm pin, Swift 6.2, Xcode 26): `pnpm install` once for script deps.
 - `pnpm check` → swiftformat + swiftlint + swift test (use before PRs).
 - `pnpm check:coverage` → coverage run (isolated build dir under `.build/coverage`).
 - `pnpm test` → `Scripts/test.sh` (SwiftPM `--cache-path ~/Library/Caches/RepoBar/swiftpm`); add `--filter` for focused runs.
