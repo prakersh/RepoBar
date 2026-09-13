@@ -73,7 +73,7 @@ The [CLI reference](docs/cli.md) covers authentication, repositories, local Git 
 
 ## Documentation
 
-- [Product and technical specification](docs/spec.md)
+- [Original product specification](docs/spec.md)
 - [CLI reference](docs/cli.md)
 - [Cache and archive design](docs/cache.md)
 - [Authentication storage](docs/auth-storage.md)
@@ -82,7 +82,7 @@ The [CLI reference](docs/cli.md) covers authentication, repositories, local Git 
 
 ## Development
 
-Development requires macOS, Xcode 26 with Swift 6.2, Node.js 22.12 or newer, and pnpm 11.
+Development requires macOS, Xcode 26 with Swift 6.2, Node.js 22.13 or newer, and pnpm 11.
 
 ```sh
 pnpm install

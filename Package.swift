@@ -16,10 +16,8 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/steipete/Commander", exact: "0.2.4"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.8.1"),
-        .package(url: "https://github.com/orchetect/MenuBarExtraAccess", from: "1.3.1"),
         .package(url: "https://github.com/apple/swift-algorithms", from: "1.2.1"),
         .package(url: "https://github.com/apple/swift-log", from: "1.8.0"),
-        .package(url: "https://github.com/openid/AppAuth-iOS", from: "3.0.0"),
         .package(url: "https://github.com/apollographql/apollo-ios", from: "2.0.3"),
         .package(url: "https://github.com/onevcat/Kingfisher", from: "8.6.0"),
         .package(url: "https://github.com/steipete/Swiftdansi", from: "0.1.1"),
@@ -43,9 +41,7 @@ let package = Package(
             dependencies: [
                 "RepoBarCore",
                 .product(name: "Sparkle", package: "Sparkle"),
-                .product(name: "MenuBarExtraAccess", package: "MenuBarExtraAccess"),
                 .product(name: "Algorithms", package: "swift-algorithms"),
-                .product(name: "AppAuth", package: "AppAuth-iOS"),
                 .product(name: "Kingfisher", package: "Kingfisher"),
                 .product(name: "Logging", package: "swift-log"),
             ],

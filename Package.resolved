@@ -1,5 +1,5 @@
 {
-  "originHash" : "4c57b5b45d367498d2f9558993f88e9082b3afb7b8b7f23e83674edc7d33a20b",
+  "originHash" : "ff960b9dbeeb3516a101be1088be92224e74b1242515a1624a26911892e7b2a3",
   "pins" : [
     {
       "identity" : "apollo-ios",
@@ -8,15 +8,6 @@
       "state" : {
         "revision" : "fe14c216aaea3d25274343e80ccb3015fc3fb0b0",
         "version" : "2.4.0"
-      }
-    },
-    {
-      "identity" : "appauth-ios",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/openid/AppAuth-iOS",
-      "state" : {
-        "revision" : "a972daac82d449d58ab119e91c68153e29ddac33",
-        "version" : "3.0.0"
       }
     },
     {
@@ -44,15 +35,6 @@
       "state" : {
         "revision" : "be0d257b9bd47a4e6e1265fc8c237411825f107a",
         "version" : "8.12.0"
-      }
-    },
-    {
-      "identity" : "menubarextraaccess",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/orchetect/MenuBarExtraAccess",
-      "state" : {
-        "revision" : "e93e3a5b814714bf4d4cea67bf63a6b6a8323968",
-        "version" : "1.3.1"
       }
     },
     {

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Compatibility:** Development tooling requires Node.js 22.13 or newer, matching the existing pnpm requirement; update pnpm to 11.26 and pin CI tooling with verified downloads.
 - Update SwiftLog to 1.15.1 and Zod to 4.6.2 for app logging and GraphQL developer tooling.
 
 ## 0.9.0 - 2026-09-07
