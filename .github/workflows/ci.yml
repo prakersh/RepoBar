@@ -75,6 +75,9 @@ jobs:
       - name: Run checks
         run: pnpm check
 
+      - name: Install iOS 26.1 platform
+        run: xcodebuild -downloadPlatform iOS -buildVersion 26.1
+
       - name: Build iOS app and tests
         run: |
           xcodebuild -project RepoBariOS/RepoBariOS.xcodeproj -scheme RepoBariOS \
