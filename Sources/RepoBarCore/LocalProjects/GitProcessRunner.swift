@@ -62,11 +62,7 @@
             let didExit = DispatchSemaphore(value: 0)
             process.terminationHandler = { _ in didExit.signal() }
 
-            do {
-                try process.run()
-            } catch {
-                throw error
-            }
+            try process.run()
 
             if let timeout {
                 let timeoutResult = didExit.wait(timeout: .now() + timeout)

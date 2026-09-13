@@ -379,7 +379,7 @@ final class AppModel {
         guard repos.isEmpty == false else { return [] }
         let limit = max(1, min(self.hydrateConcurrencyLimit, repos.count))
         var detailed: [Repository] = []
-        for batch in repos.chunked(into: limit) {
+        for batch in repos.repoBarBatches(of: limit) {
             let batchResult = await withTaskGroup(of: Repository?.self) { group in
                 for repo in batch {
                     group.addTask { [github] in

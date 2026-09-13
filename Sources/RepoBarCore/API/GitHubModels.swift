@@ -118,30 +118,6 @@ struct ActionsRunsResponse: Decodable {
     }
 }
 
-struct CommentResponse: Decodable {
-    let body: String
-    let user: CommentUser
-    let htmlUrl: URL
-    let createdAt: Date
-
-    var bodyPreview: String {
-        let trimmed = self.body.trimmingCharacters(in: .whitespacesAndNewlines)
-        let prefix = String(trimmed.prefix(80))
-        return prefix + (trimmed.count > 80 ? "…" : "")
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case body
-        case user
-        case htmlUrl = "html_url"
-        case createdAt = "created_at"
-    }
-
-    struct CommentUser: Decodable {
-        let login: String
-    }
-}
-
 struct TrafficResponse: Decodable {
     let uniques: Int
 }

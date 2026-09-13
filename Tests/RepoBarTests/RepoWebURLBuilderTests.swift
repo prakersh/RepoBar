@@ -1,5 +1,5 @@
 import Foundation
-@testable import RepoBar
+import RepoBarCore
 import Testing
 
 struct RepoWebURLBuilderTests {

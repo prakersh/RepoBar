@@ -236,7 +236,7 @@ extension AppState {
         let limit = max(1, min(self.hydrateConcurrencyLimit, repos.count))
         let options = RepositoryDetailOptions(fetchHeatmap: fetchHeatmap)
         var detailed: [Repository] = []
-        for batch in repos.chunked(into: limit) {
+        for batch in repos.repoBarBatches(of: limit) {
             if Task.isCancelled {
                 break
             }

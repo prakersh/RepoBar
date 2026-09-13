@@ -49,14 +49,6 @@ struct RepoItemPermissions: Decodable {
     }
 }
 
-struct SearchIssuesResponse: Decodable {
-    let totalCount: Int
-
-    enum CodingKeys: String, CodingKey {
-        case totalCount = "total_count"
-    }
-}
-
 struct IssueReferenceSearchResponse: Decodable {
     let items: [IssueReferenceSearchItem]
 }

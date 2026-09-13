@@ -1,4 +1,4 @@
-extension Array {
+public extension Array {
     func repoBarBatches(of size: Int) -> [ArraySlice<Element>] {
         guard size > 0 else { return [self[...]] }
 

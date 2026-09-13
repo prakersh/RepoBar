@@ -1,4 +1,4 @@
-@testable import RepoBariOS
+import RepoBarCore
 import Foundation
 import Testing
 

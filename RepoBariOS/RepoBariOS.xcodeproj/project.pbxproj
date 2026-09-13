@@ -16,7 +16,6 @@
 		23A160313A67F857ADFC6D4A /* RepoFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E1E7701B5D0E364FF641342 /* RepoFilesView.swift */; };
 		27F69985DFF2FB738CFC3F50 /* RepoBariOSShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8593BCB0DFABDADD6DC9E0D3 /* RepoBariOSShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		3A706924DDE8F2D1E868302A /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5158A8B61F0C91606A901C /* ActivityView.swift */; };
-		3A7E17D2737B1E31C7DED394 /* RepoWebURLBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1E7D39231041D1F1E081140 /* RepoWebURLBuilder.swift */; };
 		3C8F96017A15E9AC87C0045F /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA750CFD80CCBC401B5DC04D /* AppModel.swift */; };
 		42576806C6901849276ABF8E /* RepoDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAA36FA2FA5C305E417B6144 /* RepoDetailView.swift */; };
 		426BADF74ECFBB3FE53095C4 /* AppLimits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99903F321991C6D627B95C7B /* AppLimits.swift */; };
@@ -26,7 +25,6 @@
 		60FA047F7447D028CC0FA510 /* RefreshScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 563EFBA30794CEB2595BB966 /* RefreshScheduler.swift */; };
 		6120CFEFB0EBF1767980D7D2 /* OwnerFilterParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000464CD2D3EE982842823CC /* OwnerFilterParser.swift */; };
 		62E4F059A529E8841DF296FA /* RefreshInterval+Label.swift in Sources */ = {isa = PBXBuildFile; fileRef = 107319F688D7A775FF4B780A /* RefreshInterval+Label.swift */; };
-		6DCEAE33CA9039A750958314 /* Array+Chunked.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4792F0101A6FEF71165BF40 /* Array+Chunked.swift */; };
 		77D804506AD7E74D5C847938 /* RepoBariOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F000CC2F6DC230D5F7E73768 /* RepoBariOSApp.swift */; };
 		7A98978CA4B9380E36625C0D /* RepoListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A6BDB645F79B05AA4E6D081 /* RepoListView.swift */; };
 		825AE4CE4B24F85651E6B04D /* RepoBarCore in Frameworks */ = {isa = PBXBuildFile; productRef = D74BFA436D25399AB8463C39 /* RepoBarCore */; };
@@ -108,13 +106,11 @@
 		99903F321991C6D627B95C7B /* AppLimits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLimits.swift; sourceTree = "<group>"; };
 		9A807101819ECB8D6B0206A2 /* RepositorySortKey+Label.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RepositorySortKey+Label.swift"; sourceTree = "<group>"; };
 		A3E3352673824AD6557FB3B1 /* HeatmapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeatmapView.swift; sourceTree = "<group>"; };
-		B4792F0101A6FEF71165BF40 /* Array+Chunked.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Array+Chunked.swift"; sourceTree = "<group>"; };
 		B5276C582EE6B9E37FEFFDD1 /* RepoBariOSTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RepoBariOSTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B742897CD4D1AFF0E5C8C58E /* RepoCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoCardView.swift; sourceTree = "<group>"; };
 		BA5158A8B61F0C91606A901C /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		BA750CFD80CCBC401B5DC04D /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 		D8DAAD776BCFAD8C0BB42258 /* AppSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSession.swift; sourceTree = "<group>"; };
-		E1E7D39231041D1F1E081140 /* RepoWebURLBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoWebURLBuilder.swift; sourceTree = "<group>"; };
 		F000CC2F6DC230D5F7E73768 /* RepoBariOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoBariOSApp.swift; sourceTree = "<group>"; };
 		FAA36FA2FA5C305E417B6144 /* RepoDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepoDetailView.swift; sourceTree = "<group>"; };
 		FC878EFB8821470DCE58F60D /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
@@ -214,7 +210,6 @@
 			isa = PBXGroup;
 			children = (
 				99903F321991C6D627B95C7B /* AppLimits.swift */,
-				B4792F0101A6FEF71165BF40 /* Array+Chunked.swift */,
 				1DDA676FBF67AB625794875B /* GitHubReferenceMatch+Display.swift */,
 				75D8389DE4F45804274941BA /* GlassStyles.swift */,
 				84059B3F58ED56D01DC050FA /* IncomingReferenceURL.swift */,
@@ -222,7 +217,6 @@
 				107319F688D7A775FF4B780A /* RefreshInterval+Label.swift */,
 				563EFBA30794CEB2595BB966 /* RefreshScheduler.swift */,
 				9A807101819ECB8D6B0206A2 /* RepositorySortKey+Label.swift */,
-				E1E7D39231041D1F1E081140 /* RepoWebURLBuilder.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -399,7 +393,6 @@
 				426BADF74ECFBB3FE53095C4 /* AppLimits.swift in Sources */,
 				3C8F96017A15E9AC87C0045F /* AppModel.swift in Sources */,
 				0DC367D0B45B1E71D3FF0103 /* AppSession.swift in Sources */,
-				6DCEAE33CA9039A750958314 /* Array+Chunked.swift in Sources */,
 				058B0ED7732E2B4C76CCD0A4 /* GitHubReferenceMatch+Display.swift in Sources */,
 				85B2F5E4B5D4A76CA37B8D3C /* GlassStyles.swift in Sources */,
 				9EB435999454B779FF86A75A /* HeatmapAxisLabelsView.swift in Sources */,
@@ -417,7 +410,6 @@
 				42576806C6901849276ABF8E /* RepoDetailView.swift in Sources */,
 				23A160313A67F857ADFC6D4A /* RepoFilesView.swift in Sources */,
 				7A98978CA4B9380E36625C0D /* RepoListView.swift in Sources */,
-				3A7E17D2737B1E31C7DED394 /* RepoWebURLBuilder.swift in Sources */,
 				15A96DF4CF7EA83F7745A031 /* RepositoryCardModel.swift in Sources */,
 				5074CE9150A55025D76699B0 /* RepositorySortKey+Label.swift in Sources */,
 				8871EA5BB70B99440560589F /* RootView.swift in Sources */,
