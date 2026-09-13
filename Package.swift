@@ -78,7 +78,7 @@ let package = Package(
             ]),
         .testTarget(
             name: "repobarcliTests",
-            dependencies: ["repobarcli"],
+            dependencies: ["repobarcli", "RepoBarCore"],
             path: "Tests/repobarcliTests",
             resources: [
                 .process("Fixtures"),

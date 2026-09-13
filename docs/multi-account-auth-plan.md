@@ -8,7 +8,7 @@ read_when:
 
 # Multi-Account Authentication
 
-RepoBar supports multiple saved GitHub.com and Enterprise accounts. The active account drives the existing repository menu, reference monitor and notifications. Account storage and token refresh are scoped independently; aggregate session data does not imply that every UI or background service consumes all accounts.
+RepoBar supports multiple saved GitHub.com and Enterprise accounts. The active account drives the existing repository menu, reference monitor and notifications. Account storage and token refresh are scoped independently. Saving several accounts does not make the menu aggregate their repositories.
 
 ## Account ownership
 
@@ -16,7 +16,7 @@ RepoBar supports multiple saved GitHub.com and Enterprise accounts. The active a
 
 `AccountManager` owns a `GitHubClient` and OAuth refresher per account. `AppState.bootstrapAccounts()` loads saved accounts, attempts migration when the account list is empty, and selects the active client. The lifecycle's five-minute refresh loop asks the manager to refresh all account-scoped OAuth credentials; PAT accounts do not need token refresh.
 
-`Session.accountSessions` holds per-account snapshots, and `TaggedRepo` includes the account ID in repository identity. The current menu uses the active account's repository lists. Account visibility and aggregation models remain available for future consumers.
+`Session` holds the active account’s repository lists. `UserSettings.accountSelection` remains a persisted visibility preference; multi-account menu aggregation is deferred.
 
 ## Storage and compatibility
 

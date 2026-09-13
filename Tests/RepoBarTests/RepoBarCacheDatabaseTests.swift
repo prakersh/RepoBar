@@ -52,9 +52,9 @@ struct RepoBarCacheDatabaseTests {
         #expect(result.tables.first?.name == "threads")
         #expect(result.tables.first?.importedRows == 2)
         #expect(result.totalRows == 2)
-        #expect(Self.sqliteValue(database, "select count(*) from threads") == "2")
-        #expect(Self.sqliteValue(database, "select title from threads where number = '12'") == "Cache issue")
-        #expect(Self.sqliteValue(database, "select cursor from sync_state where scope = 'repobar:last_import'") == "2026-05-03T17:02:00.000Z")
+        #expect(try Self.sqliteValue(database, "select count(*) from threads") == "2")
+        #expect(try Self.sqliteValue(database, "select title from threads where number = '12'") == "Cache issue")
+        #expect(try Self.sqliteValue(database, "select cursor from sync_state where scope = 'repobar:last_import'") == "2026-05-03T17:02:00.000Z")
 
         let reader = GitHubArchiveReader(databasePath: database.path)
         let issues = try reader.recentIssues(owner: "steipete", name: "RepoBar", limit: 10)
@@ -204,15 +204,14 @@ struct RepoBarCacheDatabaseTests {
         #expect(process.terminationStatus == 0)
     }
 
-    private static func sqliteValue(_ database: URL, _ sql: String) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        process.arguments = [database.path, sql]
-        let output = Pipe()
-        process.standardOutput = output
-        try? process.run()
-        process.waitUntilExit()
-        let data = (try? output.fileHandleForReading.readToEnd()) ?? Data()
-        return (String(bytes: data, encoding: .utf8) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    private static func sqliteValue(_ database: URL, _ sql: String) throws -> String {
+        let result = try GitProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/sqlite3"),
+            arguments: [database.path, sql],
+            in: database.deletingLastPathComponent(),
+            timeout: 30
+        )
+        #expect(result.terminationStatus == 0, "\(result.stderr)")
+        return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -359,29 +359,6 @@ private func writeFile(_ url: URL, contents: String) throws {
     try Data(contents.utf8).write(to: url, options: .atomic)
 }
 
-@discardableResult
-private func runGit(_ arguments: [String], in directory: URL) throws -> String {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-    process.currentDirectoryURL = directory
-    process.arguments = arguments
-
-    let out = Pipe()
-    let err = Pipe()
-    process.standardOutput = out
-    process.standardError = err
-
-    try process.run()
-    process.waitUntilExit()
-
-    let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let error = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    if process.terminationStatus != 0 {
-        throw GitTestError.commandFailed(arguments: arguments, output: output, error: error)
-    }
-    return output
-}
-
 private func initializeRepo(at url: URL, origin: String) throws {
     try runGit(["init"], in: url)
     try runGit(["switch", "-c", "main"], in: url)
@@ -417,8 +394,4 @@ private func makeRepository(name: String, owner: String) -> Repository {
         heatmap: [],
         detailCacheState: nil
     )
-}
-
-private enum GitTestError: Error {
-    case commandFailed(arguments: [String], output: String, error: String)
 }

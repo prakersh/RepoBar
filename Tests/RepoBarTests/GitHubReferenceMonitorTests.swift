@@ -649,24 +649,3 @@ struct GitHubReferenceMonitorTests {
         ])
     }
 }
-
-@discardableResult
-private func runGit(_ arguments: [String], in directory: URL) throws -> String {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = ["git"] + arguments
-    process.currentDirectoryURL = directory
-    let output = Pipe()
-    let error = Pipe()
-    process.standardOutput = output
-    process.standardError = error
-    try process.run()
-    process.waitUntilExit()
-    let data = output.fileHandleForReading.readDataToEndOfFile()
-    if process.terminationStatus != 0 {
-        let errorData = error.fileHandleForReading.readDataToEndOfFile()
-        let message = String(data: errorData, encoding: .utf8) ?? "git failed"
-        throw NSError(domain: "GitHubReferenceMonitorTests", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message])
-    }
-    return String(data: data, encoding: .utf8) ?? ""
-}

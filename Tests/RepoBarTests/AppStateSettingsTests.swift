@@ -67,6 +67,7 @@ struct AppStateSettingsTests {
 
         #expect(restarted.session.account == .loggedIn(UserIdentity(username: account.username, host: account.host)))
         #expect(restarted.session.hasStoredTokens)
-        #expect(restarted.session.activeAccountID == account.id)
+        #expect(restarted.accountManager.activeAccountID == account.id)
+        #expect(restarted.session.settings.resolvedActiveAccount()?.id == account.id)
     }
 }

@@ -40,12 +40,6 @@ final class Session {
     var gitHubReferenceMatch: GitHubReferenceMatch?
     var actionsOrgSnapshots: [ActionsOrgSnapshot] = []
     var actionsPlanTier: GitHubPlanTier = .free
-    // Multi-account state. Populated by AccountManager during bootstrap.
-    // The aggregate `repositories` / `accessibleRepositories` above remain
-    // authoritative for the existing single-account menu rendering.
-    var accountSessions: [AccountSession] = []
-    var activeAccountID: String?
-    var aggregatedRepositories: [TaggedRepo] = []
 
     var rateLimitDisplayState: RateLimitDisplayState {
         RateLimitDisplayState(

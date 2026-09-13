@@ -2,15 +2,7 @@ import Foundation
 import RepoBarCore
 
 extension AppState {
-    /// Bootstraps the account manager and runs one-shot legacy migration on first launch.
-    ///
-    /// Migration steps:
-    /// 1. If `settings.accounts` is already populated, just hand them to the manager.
-    /// 2. Otherwise probe legacy single-account credentials (OAuth, then PAT) and
-    ///    derive a single `Account` from `GET /user`. Move tokens under the new
-    ///    account-scoped Keychain keys and persist `settings.accounts`.
-    /// 3. Mark the discovered account active so all existing single-account
-    ///    code paths keep working through `session.activeAccountID`.
+    /// Copies legacy credentials when needed, then selects the saved account’s client.
     func bootstrapAccounts() async {
         let manager = self.accountManager
         if self.session.settings.accounts.isEmpty {
@@ -22,16 +14,12 @@ extension AppState {
         }
         await manager.bootstrap(from: self.session.settings)
         await self.syncPrimaryGitHubClientToActiveAccount()
-        self.session.activeAccountID = manager.activeAccountID
         if let active = manager.activeAccount(), manager.hasStoredCredentials(accountID: active.id) {
             self.session.account = .loggedIn(UserIdentity(username: active.username, host: active.host))
             self.session.hasStoredTokens = true
         } else {
             self.session.account = .loggedOut
             self.session.hasStoredTokens = false
-        }
-        self.session.accountSessions = self.session.settings.accounts.map { account in
-            AccountSession(account: account)
         }
     }
 
@@ -167,14 +155,8 @@ extension AppState {
         self.session.settings.activeAccountID = account.id
         self.mirrorActiveAccountIntoSettings(account)
         self.mirrorActiveAccountCredentialsToLegacy(account)
-        self.session.activeAccountID = self.accountManager.activeAccountID
         await self.syncPrimaryGitHubClientToActiveAccount()
-        self.session.accountSessions = self.session.settings.accounts.map { existing in
-            if let current = self.session.accountSessions.first(where: { $0.id == existing.id }) {
-                return current
-            }
-            return AccountSession(account: existing)
-        }
+
         self.persistSettings()
     }
 
@@ -182,7 +164,6 @@ extension AppState {
     func switchActiveAccount(to accountID: String) async {
         guard self.accountManager.setActive(accountID: accountID) else { return }
 
-        self.session.activeAccountID = accountID
         self.session.settings.activeAccountID = accountID
         if let active = self.accountManager.activeAccount() {
             self.mirrorActiveAccountIntoSettings(active)
@@ -199,10 +180,8 @@ extension AppState {
     func removeAccount(_ accountID: String) async {
         await self.accountManager.remove(accountID: accountID)
         self.session.settings.accounts.removeAll(where: { $0.id == accountID })
-        self.session.accountSessions.removeAll(where: { $0.id == accountID })
         if self.session.settings.activeAccountID == accountID {
             self.session.settings.activeAccountID = self.session.settings.accounts.first?.id
-            self.session.activeAccountID = self.session.settings.activeAccountID
         }
         if let active = self.accountManager.activeAccount() {
             self.mirrorActiveAccountIntoSettings(active)

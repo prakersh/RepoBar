@@ -2,10 +2,20 @@ import Commander
 import Darwin
 import Foundation
 @testable import repobarcli
+@testable import RepoBarCore
 import Testing
 
 @Suite(.serialized)
 struct CLIEndToEndTests {
+    @Test
+    func `fixture commands capture output larger than pipe capacity`() throws {
+        try runProcess(
+            "sh",
+            ["-c", "i=0; while [ $i -lt 2000 ]; do printf '%0100d\\n' 0; printf '%0100d\\n' 0 >&2; i=$((i + 1)); done"],
+            in: FileManager.default.temporaryDirectory
+        )
+    }
+
     @Test
     @MainActor
     func `stdout capture handles output larger than a pipe buffer`() async throws {
@@ -300,15 +310,13 @@ private enum FixtureError: Error {
 }
 
 private func runProcess(_ executable: String, _ arguments: [String], in directory: URL) throws {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = [executable] + arguments
-    process.currentDirectoryURL = directory
-    process.standardOutput = Pipe()
-    process.standardError = Pipe()
-    try process.run()
-    process.waitUntilExit()
-    guard process.terminationStatus == 0 else {
+    let result = try GitProcessRunner.run(
+        executableURL: URL(fileURLWithPath: "/usr/bin/env"),
+        arguments: [executable] + arguments,
+        in: directory,
+        timeout: 30
+    )
+    guard result.terminationStatus == 0 else {
         throw ProcessError.failed(executable: executable, arguments: arguments)
     }
 }

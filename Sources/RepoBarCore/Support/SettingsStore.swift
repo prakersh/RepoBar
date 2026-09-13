@@ -33,9 +33,8 @@ public struct SettingsStore {
 
         let decoder = JSONDecoder()
         if let envelope = try? decoder.decode(SettingsEnvelope.self, from: data) {
-            var settings = envelope.settings
+            let settings = envelope.settings
             if envelope.version < Self.currentVersion {
-                Self.applyMigrations(to: &settings, fromVersion: envelope.version)
                 self.save(settings)
             }
             return settings
@@ -48,10 +47,6 @@ public struct SettingsStore {
         if let data = try? JSONEncoder().encode(envelope) {
             self.defaults.set(data, forKey: self.key)
         }
-    }
-
-    private static func applyMigrations(to _: inout UserSettings, fromVersion: Int) {
-        guard fromVersion < self.currentVersion else { return }
     }
 }
 
