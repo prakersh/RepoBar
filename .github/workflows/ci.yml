@@ -16,7 +16,7 @@ concurrency:
 jobs:
   macos:
     name: macOS (Xcode 26.1)
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 35
     steps:
       - name: Checkout
@@ -75,8 +75,10 @@ jobs:
       - name: Run checks
         run: pnpm check
 
-      - name: Install iOS 26.1 platform
-        run: xcodebuild -downloadPlatform iOS -buildVersion 26.1
+      - name: Select Xcode for iOS
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: '26.6'
 
       - name: Build iOS app and tests
         run: |
