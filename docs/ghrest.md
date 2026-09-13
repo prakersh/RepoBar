@@ -27,3 +27,5 @@ Lightweight CLI to hit the GitHub REST endpoints RepoBar relies on.
 ## Notes
 - Shows rate-limit reset when available.
 - Wrapper script `ghrest` runs `pnpx dotenv-cli -e .env -- tsx Scripts/ghrest.ts`.
+
+Global flags work before or after the subcommand. Enterprise REST base paths such as `https://github.example.com/api/v3` are preserved. JSON stdout contains only the response payload; progress and rate-limit diagnostics use stderr. Pending heatmap responses with an empty body produce `{}` in JSON mode. HTTP failures, including a missing repository, exit unsuccessfully.

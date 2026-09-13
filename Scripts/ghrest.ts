@@ -1,46 +1,57 @@
 #!/usr/bin/env tsx
-/**
- * ghrest - GitHub REST CLI helpers for RepoBar
- *
- * Examples:
- *   pnpm ghrest repo steipete/RepoBar
- *   pnpm ghrest traffic steipete/RepoBar --json
- *   pnpm ghrest ci steipete/RepoBar --branch main
- */
-
 import process from 'node:process';
 import { Command, Option } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import { requireToken, resolveEndpointConfig } from './github-env';
+import { githubOptions, printJSON, printRateLimit, rateLimitReset, reportError, repositoryName, withSpinner } from './github-cli';
+import type { GitHubOptions } from './github-cli';
 
-type Json = Record<string, unknown> | Array<unknown>;
+type Reply<T> = { json: T; rateLimitReset?: number };
+type Repository = { stargazers_count?: number; open_issues_count?: number; default_branch?: string };
+type WorkflowRun = { status?: string; conclusion?: string };
+type Traffic = { uniques?: number };
+type Week = { total?: number };
+type Comment = { created_at: string; user?: { login?: string }; body?: string; html_url?: string };
+type Release = { draft?: boolean; name?: string; tag_name?: string; published_at?: string; created_at?: string; html_url?: string };
 
-async function getJson(path: string, opts: { host: string; token: string; allowed?: number[] }) {
-  const url = new URL(path, opts.host).toString();
-  const resp = await fetch(url, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${opts.token}`,
-      'User-Agent': 'RepoBar-CLI',
-    },
-  });
-  const allowed = new Set([200, 202, ...(opts.allowed ?? [])]);
-  if (!allowed.has(resp.status)) {
-    const body = await resp.text();
-    throw new Error(`HTTP ${resp.status}: ${body}`);
-  }
-  const rateReset = resp.headers.get('x-ratelimit-reset');
+function repositoryClient(slug: string, command: Command) {
+  const repo = repositoryName(slug);
+  const options = githubOptions(command);
+  const config = resolveEndpointConfig({ token: options.token, restHost: options.host });
+  const token = requireToken(config.token);
+  const base = new URL(config.restEndpoint);
+  base.pathname = base.pathname.replace(/\/+$/, '') + '/';
+  base.search = '';
+  base.hash = '';
+  const path = `repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`;
+
   return {
-    json: (await resp.json()) as Json,
-    rateReset: rateReset ? Number.parseInt(rateReset, 10) : undefined,
-    status: resp.status,
+    ...repo,
+    options,
+    async get<T>(suffix: string): Promise<Reply<T> & { status: number }> {
+      const response = await fetch(new URL(path + suffix, base), {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${token}`,
+          'User-Agent': 'RepoBar-CLI',
+        },
+      });
+      const body = await response.text();
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${body || response.statusText}`);
+      if (!body && response.status !== 202) throw new Error(`Empty JSON response (status ${response.status})`);
+      return {
+        json: (body ? JSON.parse(body) : {}) as T,
+        rateLimitReset: rateLimitReset(response),
+        status: response.status,
+      };
+    },
   };
 }
 
-function formatRate(reset?: number): string | undefined {
-  if (!reset) return;
-  return `rate limit resets ${new Date(reset * 1000).toLocaleTimeString()}`;
+function present<T>(reply: Reply<T>, options: GitHubOptions, render: (json: T) => void) {
+  if (options.json) printJSON(reply.json);
+  else render(reply.json);
+  printRateLimit(reply.rateLimitReset);
 }
 
 const program = new Command()
@@ -51,253 +62,91 @@ const program = new Command()
   .option('--json', 'Print raw JSON', false)
   .showHelpAfterError();
 
-program
-  .command('repo')
-  .argument('<owner/repo>')
-  .description('Fetch repository JSON')
-  .action(async (slug: string, _opts, cmd: Command) => {
-    const spinner = ora('Fetching repo').start();
-    try {
-      const [owner, name] = slug.split('/');
-      if (!owner || !name) throw new Error('Use owner/repo format.');
-      const { restEndpoint, token } = resolveEndpointConfig({
-        token: cmd.getOptionValue('token'),
-        restHost: cmd.getOptionValue('host'),
-      });
-      const authedToken = requireToken(token);
-      const { json, rateReset } = await getJson(`/repos/${owner}/${name}`, {
-        host: restEndpoint,
-        token: authedToken,
-      });
-      spinner.stop();
-      if (program.getOptionValue('json')) {
-        console.log(JSON.stringify(json, null, 2));
-      } else {
-        const repo = json as Record<string, unknown>;
-        console.log(
-          [
-            chalk.bold(`${owner}/${name}`),
-            `Stars: ${repo.stargazers_count ?? 'n/a'}`,
-            `Issues: ${repo.open_issues_count ?? 'n/a'}`,
-            `Default branch: ${repo.default_branch ?? 'n/a'}`,
-          ].join('\n')
-        );
-      }
-      const rl = formatRate(rateReset);
-      if (rl) console.log(chalk.dim(rl));
-    } catch (error) {
-      spinner.stop();
-      console.error(chalk.red((error as Error).message));
-      process.exitCode = 1;
-    }
+program.command('repo').argument('<owner/repo>').description('Fetch repository JSON')
+  .action(async (slug: string, _options, command: Command) => {
+    const client = repositoryClient(slug, command);
+    const reply = await withSpinner('Fetching repo', () => client.get<Repository>(''));
+    present(reply, client.options, (repo) => console.log([
+      chalk.bold(client.fullName),
+      `Stars: ${repo.stargazers_count ?? 'n/a'}`,
+      `Issues: ${repo.open_issues_count ?? 'n/a'}`,
+      `Default branch: ${repo.default_branch ?? 'n/a'}`,
+    ].join('\n')));
   });
 
-program
-  .command('ci')
-  .argument('<owner/repo>')
-  .option('--branch <name>', 'Branch to filter', 'main')
+program.command('ci').argument('<owner/repo>').option('--branch <name>', 'Branch to filter', 'main')
   .description('Show latest Actions run for a branch')
-  .action(async (slug: string, opts: { branch: string }, cmd: Command) => {
-    const spinner = ora('Fetching CI status').start();
-    try {
-      const [owner, name] = slug.split('/');
-      if (!owner || !name) throw new Error('Use owner/repo format.');
-      const { restEndpoint, token } = resolveEndpointConfig({
-        token: cmd.getOptionValue('token'),
-        restHost: cmd.getOptionValue('host'),
-      });
-      const authedToken = requireToken(token);
-      const { json, rateReset } = await getJson(
-        `/repos/${owner}/${name}/actions/runs?per_page=1&branch=${encodeURIComponent(opts.branch)}`,
-        { host: restEndpoint, token: authedToken }
-      );
-      spinner.stop();
-      const runs = (json as { workflow_runs?: Array<Record<string, unknown>> }).workflow_runs ?? [];
-      const run = runs[0];
-      if (program.getOptionValue('json')) {
-        console.log(JSON.stringify(json, null, 2));
-      } else if (run) {
-        console.log(
-          [
-            chalk.bold(`${owner}/${name}@${opts.branch}`),
-            `Status: ${run.status ?? 'unknown'}`,
-            `Conclusion: ${run.conclusion ?? 'n/a'}`,
-          ].join('\n')
-        );
-      } else {
-        console.log('No runs found.');
-      }
-      const rl = formatRate(rateReset);
-      if (rl) console.log(chalk.dim(rl));
-    } catch (error) {
-      spinner.stop();
-      console.error(chalk.red((error as Error).message));
-      process.exitCode = 1;
-    }
+  .action(async (slug: string, options: { branch: string }, command: Command) => {
+    const client = repositoryClient(slug, command);
+    const query = new URLSearchParams({ per_page: '1', branch: options.branch });
+    const reply = await withSpinner('Fetching CI status', () => client.get<{ workflow_runs?: WorkflowRun[] }>(`/actions/runs?${query}`));
+    present(reply, client.options, (json) => {
+      const run = json.workflow_runs?.[0];
+      console.log(run ? [
+        chalk.bold(`${client.fullName}@${options.branch}`),
+        `Status: ${run.status ?? 'unknown'}`,
+        `Conclusion: ${run.conclusion ?? 'n/a'}`,
+      ].join('\n') : 'No runs found.');
+    });
   });
 
-program
-  .command('traffic')
-  .argument('<owner/repo>')
-  .description('Fetch traffic views and clones (requires repo admin permission)')
-  .action(async (slug: string, _opts, cmd: Command) => {
-    const spinner = ora('Fetching traffic').start();
-    try {
-      const [owner, name] = slug.split('/');
-      const { restEndpoint, token } = resolveEndpointConfig({
-        token: cmd.getOptionValue('token'),
-        restHost: cmd.getOptionValue('host'),
-      });
-      const authedToken = requireToken(token);
-      const [viewsResp, clonesResp] = await Promise.all([
-        getJson(`/repos/${owner}/${name}/traffic/views`, { host: restEndpoint, token: authedToken }),
-        getJson(`/repos/${owner}/${name}/traffic/clones`, { host: restEndpoint, token: authedToken }),
-      ]);
-      spinner.stop();
-      if (program.getOptionValue('json')) {
-        console.log(JSON.stringify({ views: viewsResp.json, clones: clonesResp.json }, null, 2));
-      } else {
-        console.log(chalk.bold(`${owner}/${name} traffic (last 14d)`));
-        console.log(`Unique visitors: ${(viewsResp.json as { uniques?: number }).uniques ?? 'n/a'}`);
-        console.log(`Unique cloners: ${(clonesResp.json as { uniques?: number }).uniques ?? 'n/a'}`);
-      }
-      const rl = formatRate(viewsResp.rateReset ?? clonesResp.rateReset);
-      if (rl) console.log(chalk.dim(rl));
-    } catch (error) {
-      spinner.stop();
-      console.error(chalk.red((error as Error).message));
-      process.exitCode = 1;
-    }
+program.command('traffic').argument('<owner/repo>').description('Fetch traffic views and clones (requires repo admin permission)')
+  .action(async (slug: string, _options, command: Command) => {
+    const client = repositoryClient(slug, command);
+    const [views, clones] = await withSpinner('Fetching traffic', () => Promise.all([
+      client.get<Traffic>('/traffic/views'), client.get<Traffic>('/traffic/clones'),
+    ]));
+    present({ json: { views: views.json, clones: clones.json }, rateLimitReset: views.rateLimitReset ?? clones.rateLimitReset }, client.options, (json) => {
+      console.log(chalk.bold(`${client.fullName} traffic (last 14d)`));
+      console.log(`Unique visitors: ${json.views.uniques ?? 'n/a'}`);
+      console.log(`Unique cloners: ${json.clones.uniques ?? 'n/a'}`);
+    });
   });
 
-program
-  .command('heatmap')
-  .argument('<owner/repo>')
-  .description('Fetch commit_activity for heatmap (weekly buckets)')
-  .action(async (slug: string, _opts, cmd: Command) => {
-    const spinner = ora('Fetching commit activity').start();
-    try {
-      const [owner, name] = slug.split('/');
-      const { restEndpoint, token } = resolveEndpointConfig({
-        token: cmd.getOptionValue('token'),
-        restHost: cmd.getOptionValue('host'),
-      });
-      const authedToken = requireToken(token);
-      const { json, rateReset, status } = await getJson(
-        `/repos/${owner}/${name}/stats/commit_activity`,
-        { host: restEndpoint, token: authedToken, allowed: [202] }
-      );
-      spinner.stop();
-      if (status === 202) {
-        console.log(chalk.yellow('GitHub is computing stats; retry in ~1 minute.'));
-        return;
-      }
-      if (program.getOptionValue('json')) {
-        console.log(JSON.stringify(json, null, 2));
-      } else {
-        const weeks = json as Array<{ total?: number }>;
-        const total = weeks.reduce((sum, w) => sum + (w.total ?? 0), 0);
-        console.log(chalk.bold(`${owner}/${name}`));
-        console.log(`Weeks: ${weeks.length}, total commits: ${total}`);
-      }
-      const rl = formatRate(rateReset);
-      if (rl) console.log(chalk.dim(rl));
-    } catch (error) {
-      spinner.stop();
-      console.error(chalk.red((error as Error).message));
-      process.exitCode = 1;
+program.command('heatmap').argument('<owner/repo>').description('Fetch commit_activity for heatmap (weekly buckets)')
+  .action(async (slug: string, _options, command: Command) => {
+    const client = repositoryClient(slug, command);
+    const reply = await withSpinner('Fetching commit activity', () => client.get<Week[]>('/stats/commit_activity'));
+    if (reply.status === 202) {
+      if (client.options.json) printJSON(reply.json);
+      else console.log(chalk.yellow('GitHub is computing stats; retry in ~1 minute.'));
+      printRateLimit(reply.rateLimitReset);
+      return;
     }
+    present(reply, client.options, (weeks) => {
+      const total = weeks.reduce((sum, week) => sum + (week.total ?? 0), 0);
+      console.log(chalk.bold(client.fullName));
+      console.log(`Weeks: ${weeks.length}, total commits: ${total}`);
+    });
   });
 
-program
-  .command('activity')
-  .argument('<owner/repo>')
-  .description('Latest issue or PR comment')
-  .action(async (slug: string, _opts, cmd: Command) => {
-    const spinner = ora('Fetching latest activity').start();
-    try {
-      const [owner, name] = slug.split('/');
-      const { restEndpoint, token } = resolveEndpointConfig({
-        token: cmd.getOptionValue('token'),
-        restHost: cmd.getOptionValue('host'),
-      });
-      const authedToken = requireToken(token);
-      const [issues, reviews] = await Promise.all([
-        getJson(
-          `/repos/${owner}/${name}/issues/comments?per_page=1&sort=created&direction=desc`,
-          { host: restEndpoint, token: authedToken }
-        ),
-        getJson(
-          `/repos/${owner}/${name}/pulls/comments?per_page=1&sort=created&direction=desc`,
-          { host: restEndpoint, token: authedToken }
-        ),
-      ]);
-      spinner.stop();
-      const candidates = [
-        ...(issues.json as Array<Record<string, unknown>>),
-        ...(reviews.json as Array<Record<string, unknown>>),
-      ];
-      const latest = candidates.sort(
-        (a, b) => new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime()
-      )[0];
-      if (program.getOptionValue('json')) {
-        console.log(JSON.stringify(latest ?? {}, null, 2));
-      } else if (latest) {
-        console.log(chalk.bold(`${owner}/${name}`));
-        console.log(`${latest.user?.login}: ${(latest.body ?? '').toString().slice(0, 80)}…`);
-        console.log(chalk.dim(latest.html_url ?? ''));
-      } else {
-        console.log('No comments found.');
-      }
-      const rl = formatRate(issues.rateReset ?? reviews.rateReset);
-      if (rl) console.log(chalk.dim(rl));
-    } catch (error) {
-      spinner.stop();
-      console.error(chalk.red((error as Error).message));
-      process.exitCode = 1;
-    }
+program.command('activity').argument('<owner/repo>').description('Latest issue or PR comment')
+  .action(async (slug: string, _options, command: Command) => {
+    const client = repositoryClient(slug, command);
+    const [issues, reviews] = await withSpinner('Fetching latest activity', () => Promise.all([
+      client.get<Comment[]>('/issues/comments?per_page=1&sort=created&direction=desc'),
+      client.get<Comment[]>('/pulls/comments?per_page=1&sort=created&direction=desc'),
+    ]));
+    const latest = [...issues.json, ...reviews.json].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+    present({ json: latest ?? {}, rateLimitReset: issues.rateLimitReset ?? reviews.rateLimitReset }, client.options, () => {
+      if (!latest) { console.log('No comments found.'); return; }
+      console.log(chalk.bold(client.fullName));
+      console.log(`${latest.user?.login}: ${(latest.body ?? '').slice(0, 80)}…`);
+      console.log(chalk.dim(latest.html_url ?? ''));
+    });
   });
 
-program
-  .command('release')
-  .argument('<owner/repo>')
-  .description('Latest non-draft release (includes prereleases)')
-  .action(async (slug: string, _opts, cmd: Command) => {
-    const spinner = ora('Fetching releases').start();
-    try {
-      const [owner, name] = slug.split('/');
-      const { restEndpoint, token } = resolveEndpointConfig({
-        token: cmd.getOptionValue('token'),
-        restHost: cmd.getOptionValue('host'),
-      });
-      const authedToken = requireToken(token);
-      const { json, rateReset } = await getJson(
-        `/repos/${owner}/${name}/releases?per_page=10`,
-        { host: restEndpoint, token: authedToken, allowed: [404] }
-      );
-      spinner.stop();
-      if (program.getOptionValue('json')) {
-        console.log(JSON.stringify(json, null, 2));
-      } else {
-        const releases = json as Array<Record<string, unknown>>;
-        const filtered = releases.filter((r) => r.draft !== true);
-        const rel = filtered[0];
-        if (rel) {
-          const date = rel.published_at ?? rel.created_at;
-          console.log(chalk.bold(`${owner}/${name}`));
-          console.log(`${rel.name ?? rel.tag_name} (${date ?? 'n/a'})`);
-          console.log(chalk.dim(rel.html_url ?? ''));
-        } else {
-          console.log('No releases found.');
-        }
-      }
-      const rl = formatRate(rateReset);
-      if (rl) console.log(chalk.dim(rl));
-    } catch (error) {
-      spinner.stop();
-      console.error(chalk.red((error as Error).message));
-      process.exitCode = 1;
-    }
+program.command('release').argument('<owner/repo>').description('Latest non-draft release (includes prereleases)')
+  .action(async (slug: string, _options, command: Command) => {
+    const client = repositoryClient(slug, command);
+    const reply = await withSpinner('Fetching releases', () => client.get<Release[]>('/releases?per_page=10'));
+    present(reply, client.options, (releases) => {
+      const release = releases.find((item) => item.draft !== true);
+      if (!release) { console.log('No releases found.'); return; }
+      console.log(chalk.bold(client.fullName));
+      console.log(`${release.name ?? release.tag_name} (${release.published_at ?? release.created_at ?? 'n/a'})`);
+      console.log(chalk.dim(release.html_url ?? ''));
+    });
   });
 
-program.parseAsync(process.argv);
+program.parseAsync(process.argv).catch(reportError);

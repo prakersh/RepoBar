@@ -24,3 +24,5 @@ Developer-only CLI to hit GitHub GraphQL quickly without touching the app.
 ## Notes
 - Prints rate-limit reset when headers are present.
 - Uses `pnpx dotenv-cli -e .env -- tsx Scripts/ghql.ts` via the `ghql` wrapper.
+
+Global flags work before or after the subcommand. `--raw` takes precedence over `--json` and prints the complete server response, including GraphQL errors; error responses still exit unsuccessfully. Rate-limit diagnostics and progress use stderr, so JSON stdout stays parseable.

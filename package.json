@@ -10,7 +10,7 @@
     "format": "./Scripts/swiftformat.sh",
     "lint": "./Scripts/swiftlint.sh",
     "coverage": "./Scripts/coverage.sh",
-    "check": "pnpm format && pnpm lint && pnpm test",
+    "check": "pnpm format && pnpm lint && pnpm test && pnpm test:tooling",
     "check:coverage": "pnpm coverage",
     "docs:list": "node Scripts/docs-list.mjs",
     "test": "./Scripts/test.sh",
@@ -22,7 +22,8 @@
     "stop": "pkill -f \"RepoBar.app/Contents/MacOS/RepoBar\" || true",
     "codegen": "./Scripts/apollo_codegen.sh",
     "ghql": "pnpm exec tsx Scripts/ghql.ts",
-    "ghrest": "pnpm exec tsx Scripts/ghrest.ts"
+    "ghrest": "pnpm exec tsx Scripts/ghrest.ts",
+    "test:tooling": "node --import tsx --test Scripts/github-cli.test.ts"
   },
   "dependencies": {
     "graphql": "^17.0.2"

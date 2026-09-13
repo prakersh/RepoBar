@@ -1,72 +1,49 @@
 #!/usr/bin/env tsx
-/**
- * ghql - tiny GitHub GraphQL CLI for RepoBar
- *
- * Examples:
- *   pnpm ghql repo steipete/RepoBar
- *   pnpm ghql contrib steipete --json
- *   pnpm ghql run GraphQL/RepoSnapshot.graphql --vars '{"owner":"steipete","name":"RepoBar"}'
- */
-
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { Command, Option } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import { z } from 'zod';
 import { requireToken, resolveEndpointConfig } from './github-env';
+import { githubOptions, printJSON, printRateLimit, printRaw, rateLimitReset, reportError, repositoryName, withSpinner } from './github-cli';
 
-type GraphQLBody = {
-  query: string;
-  variables?: Record<string, unknown>;
-};
+type GraphQLBody = { query: string; variables?: Record<string, unknown> };
+type GraphQLResponse<T> = { data?: T; errors?: { message: string }[] };
+type Release = { name?: string; tagName: string; publishedAt?: string; createdAt?: string; isLatest: boolean; isDraft: boolean; isPrerelease: boolean };
+type RepoData = { repository: { issues: { totalCount: number }; pullRequests: { totalCount: number }; latestRelease?: Release | null } | null };
+type ContributionDay = { date: string; contributionCount: number };
+type ContributionData = { user: { contributionsCollection: { contributionCalendar: { weeks: { contributionDays: ContributionDay[] }[] } } } | null };
 
-type GraphQLResponse<T> = {
-  data?: T;
-  errors?: { message: string }[];
-};
-
-const root = path.resolve(__dirname, '..');
-
-async function fetchGraphQL<T>(
-  body: GraphQLBody,
-  endpoint: string,
-  token: string
-): Promise<{ data: T; rateLimitReset?: number }> {
-  const resp = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'User-Agent': 'RepoBar-CLI',
-    },
-    body: JSON.stringify(body),
+async function execute<T>(body: GraphQLBody, command: Command, message: string): Promise<T | undefined> {
+  const options = githubOptions(command);
+  const config = resolveEndpointConfig({ token: options.token, graphqlHost: options.host });
+  const token = requireToken(config.token);
+  const { response, raw } = await withSpinner(message, async () => {
+    const response = await fetch(config.graphqlEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'User-Agent': 'RepoBar-CLI' },
+      body: JSON.stringify(body),
+    });
+    return { response, raw: await response.text() };
   });
+  if (options.raw) printRaw(raw);
+  printRateLimit(rateLimitReset(response));
 
-  const resetHeader = resp.headers.get('x-ratelimit-reset');
-  const reset = resetHeader ? Number.parseInt(resetHeader, 10) : undefined;
-
-  const json = (await resp.json()) as GraphQLResponse<T>;
-  if (!resp.ok || json.errors?.length) {
-    const message = json.errors?.map((e) => e.message).join('; ') ?? resp.statusText;
-    throw new Error(`${message} (status ${resp.status})`);
+  let json: GraphQLResponse<T>;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new Error(`Invalid JSON response (status ${response.status})`);
   }
-  if (!json.data) {
-    throw new Error('Empty GraphQL data');
+  if (!json || typeof json !== 'object') throw new Error('Invalid GraphQL response');
+  if (!response.ok || json.errors?.length) {
+    const message = json.errors?.map((error) => error.message).join('; ') || response.statusText;
+    throw new Error(`${message} (status ${response.status})`);
   }
-  return { data: json.data, rateLimitReset: reset };
-}
-
-function formatRateLimit(reset?: number): string | undefined {
-  if (!reset) return undefined;
-  const asDate = new Date(reset * 1000);
-  return `rate limit resets ${asDate.toLocaleTimeString()}`;
-}
-
-async function loadRepoSnapshotQuery(): Promise<string> {
-  const p = path.join(root, 'GraphQL', 'RepoSnapshot.graphql');
-  return fs.readFile(p, 'utf8');
+  if (options.raw) return;
+  if (json.data == null) throw new Error('Empty GraphQL data');
+  return json.data;
 }
 
 const contribQuery = `
@@ -86,153 +63,52 @@ const program = new Command()
   .name('ghql')
   .description('Lightweight GitHub GraphQL runner for RepoBar debugging')
   .addOption(new Option('--token <token>', 'GitHub token (falls back to GITHUB_TOKEN)'))
-  .addOption(
-    new Option('--host <url>', 'GraphQL endpoint (default https://api.github.com/graphql)')
-  )
+  .addOption(new Option('--host <url>', 'GraphQL endpoint (default https://api.github.com/graphql)'))
   .option('--json', 'Print raw JSON', false)
   .option('--raw', 'Print the raw server response body', false)
   .showHelpAfterError();
 
-program
-  .command('repo')
-  .argument('<owner/repo>', 'Repository in owner/name form')
-  .description('Run RepoSnapshot query to fetch issues, PRs, and latest stable release')
-  .action(async (slug: string, opts: Record<string, unknown>, cmd: Command) => {
-    const spinner = ora('Fetching repo snapshot').start();
-    try {
-      const [owner, name] = slug.split('/');
-      if (!owner || !name) throw new Error('Use owner/repo format.');
+program.command('repo').argument('<owner/repo>').description('Fetch repo snapshot (issues, PRs, latest stable release)')
+  .action(async (slug: string, _options, command: Command) => {
+    const { owner, name } = repositoryName(slug);
+    const query = await fs.readFile(path.join(__dirname, '..', 'GraphQL', 'RepoSnapshot.graphql'), 'utf8');
+    const data = await execute<RepoData>({ query, variables: { owner, name } }, command, 'Fetching repo snapshot');
+    if (data === undefined) return;
+    if (githubOptions(command).json) { printJSON(data); return; }
+    const repo = data.repository;
+    if (!repo) throw new Error('Repository not found');
+    const release = repo.latestRelease?.isLatest && !repo.latestRelease.isDraft && !repo.latestRelease.isPrerelease ? repo.latestRelease : undefined;
+    const releaseLine = release
+      ? `${release.name ?? release.tagName} (${new Date(release.publishedAt ?? release.createdAt ?? 0).toLocaleDateString()})`
+      : 'none';
+    console.log([
+      chalk.bold(`${owner}/${name}`),
+      `Issues: ${repo.issues.totalCount}`,
+      `PRs: ${repo.pullRequests.totalCount}`,
+      `Latest stable release: ${releaseLine}`,
+    ].join('\n'));
+  });
 
-      const query = await loadRepoSnapshotQuery();
-      const { graphqlEndpoint, token } = resolveEndpointConfig({
-        token: cmd.getOptionValue('token'),
-        graphqlHost: cmd.getOptionValue('host'),
-      });
-      const authedToken = requireToken(token);
-
-      const { data, rateLimitReset } = await fetchGraphQL<{
-        repository: {
-          name: string;
-          latestRelease?: {
-            name?: string | null;
-            tagName: string;
-            publishedAt?: string | null;
-            createdAt?: string | null;
-            url: string;
-            isDraft: boolean;
-            isPrerelease: boolean;
-            isLatest: boolean;
-          } | null;
-          issues: { totalCount: number };
-          pullRequests: { totalCount: number };
-        } | null;
-      }>(
-        { query, variables: { owner, name } },
-        graphqlEndpoint,
-        authedToken
-      );
-
-      spinner.stop();
-      if (program.getOptionValue('json') || cmd.parent?.getOptionValue('json')) {
-        console.log(JSON.stringify(data, null, 2));
-        return;
-      }
-
-      const repo = data.repository;
-      if (!repo) throw new Error('Repository not found');
-      const release = repo.latestRelease?.isLatest && !repo.latestRelease.isDraft && !repo.latestRelease.isPrerelease
-        ? repo.latestRelease
-        : undefined;
-      const releaseLine = release
-        ? `${release.name ?? release.tagName} (${new Date(release.publishedAt ?? release.createdAt ?? 0).toLocaleDateString()})`
-        : 'none';
-
-      console.log(
-        [
-          chalk.bold(`${owner}/${name}`),
-          `Issues: ${repo.issues.totalCount}`,
-          `PRs: ${repo.pullRequests.totalCount}`,
-          `Latest stable release: ${releaseLine}`,
-        ].join('\n')
-      );
-      const rl = formatRateLimit(rateLimitReset);
-      if (rl) console.log(chalk.dim(rl));
-    } catch (error) {
-      spinner.stop();
-      console.error(chalk.red((error as Error).message));
-      process.exitCode = 1;
+program.command('contrib').argument('<login>').description('Fetch contribution calendar and flatten to day counts')
+  .action(async (login: string, _options, command: Command) => {
+    const data = await execute<ContributionData>({ query: contribQuery, variables: { login } }, command, 'Fetching contribution calendar');
+    if (data === undefined) return;
+    const days = data.user?.contributionsCollection.contributionCalendar.weeks.flatMap((week) => week.contributionDays) ?? [];
+    if (githubOptions(command).json) printJSON(days);
+    else {
+      console.log(chalk.bold(login));
+      console.log(`Total contributions: ${days.reduce((sum, day) => sum + day.contributionCount, 0)}`);
+      console.log(`Days: ${days.length}`);
     }
   });
 
-program
-  .command('contrib')
-  .argument('<login>', 'GitHub username')
-  .description('Fetch contribution calendar and flatten to day counts')
-  .action(async (login: string, _opts, cmd: Command) => {
-    const spinner = ora('Fetching contribution calendar').start();
-    try {
-      const { graphqlEndpoint, token } = resolveEndpointConfig({
-        token: cmd.getOptionValue('token'),
-        graphqlHost: cmd.getOptionValue('host'),
-      });
-      const authedToken = requireToken(token);
-      const { data, rateLimitReset } = await fetchGraphQL<{
-        user: {
-          contributionsCollection: {
-            contributionCalendar: { weeks: { contributionDays: { date: string; contributionCount: number }[] }[] };
-          };
-        } | null;
-      }>({ query: contribQuery, variables: { login } }, graphqlEndpoint, authedToken);
-      spinner.stop();
-      const days =
-        data.user?.contributionsCollection.contributionCalendar.weeks.flatMap((w) => w.contributionDays) ?? [];
-
-      if (program.getOptionValue('json')) {
-        console.log(JSON.stringify(days, null, 2));
-      } else {
-        const total = days.reduce((sum, d) => sum + d.contributionCount, 0);
-        console.log(chalk.bold(`${login}`));
-        console.log(`Total contributions: ${total}`);
-        console.log(`Days: ${days.length}`);
-      }
-      const rl = formatRateLimit(rateLimitReset);
-      if (rl) console.log(chalk.dim(rl));
-    } catch (error) {
-      spinner.stop();
-      console.error(chalk.red((error as Error).message));
-      process.exitCode = 1;
-    }
-  });
-
-program
-  .command('run')
-  .argument('<file>', 'Path to .graphql file')
-  .option('--vars <json>', 'Variables JSON string', '{}')
+program.command('run').argument('<file>', 'Path to .graphql file').option('--vars <json>', 'Variables JSON string', '{}')
   .description('Run an arbitrary GraphQL query')
-  .action(async (file: string, opts: { vars: string }, cmd: Command) => {
-    const spinner = ora('Running query').start();
-    try {
-      const query = await fs.readFile(path.resolve(file), 'utf8');
-      const vars = z.record(z.string(), z.any()).parse(JSON.parse(opts.vars));
-      const { graphqlEndpoint, token } = resolveEndpointConfig({
-        token: cmd.getOptionValue('token'),
-        graphqlHost: cmd.getOptionValue('host'),
-      });
-      const authedToken = requireToken(token);
-      const { data, rateLimitReset } = await fetchGraphQL<Record<string, unknown>>(
-        { query, variables: vars },
-        graphqlEndpoint,
-        authedToken
-      );
-      spinner.stop();
-      console.log(JSON.stringify(data, null, 2));
-      const rl = formatRateLimit(rateLimitReset);
-      if (rl) console.log(chalk.dim(rl));
-    } catch (error) {
-      spinner.stop();
-      console.error(chalk.red((error as Error).message));
-      process.exitCode = 1;
-    }
+  .action(async (file: string, options: { vars: string }, command: Command) => {
+    const query = await fs.readFile(path.resolve(file), 'utf8');
+    const variables = z.record(z.string(), z.unknown()).parse(JSON.parse(options.vars));
+    const data = await execute<Record<string, unknown>>({ query, variables }, command, 'Running query');
+    if (data !== undefined) printJSON(data);
   });
 
-program.parseAsync(process.argv);
+program.parseAsync(process.argv).catch(reportError);
