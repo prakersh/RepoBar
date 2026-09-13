@@ -10,6 +10,8 @@ extension GitHubReferenceMatch {
         switch self.kind {
         case .commit:
             "number"
+        case .workflowRun:
+            "play.circle"
         case .issue, .pullRequest:
             switch self.state {
             case .open:
@@ -26,7 +28,7 @@ extension GitHubReferenceMatch {
 
     var tint: Color {
         switch self.kind {
-        case .commit:
+        case .commit, .workflowRun:
             .secondary
         case .issue, .pullRequest:
             switch self.state {

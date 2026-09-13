@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Honor GitHub secondary retry delays in REST and GraphQL, pause queued requests, and retain stats cooldowns across redirects.
+- Restore iOS builds and workflow-run display, and keep local Git reference probes bounded and offline.
 - Respect repository submenu timeouts, preserve requests needed by other menus, and allow retries after bounded cancellation cleanup.
 - Honor developer CLI token/host overrides and Enterprise REST paths, keep JSON stdout clean, and implement the documented GraphQL raw-response flag.
 - **Compatibility:** Development tooling requires Node.js 22.13 or newer, matching the existing pnpm requirement; update pnpm to 11.26 and pin CI tooling with verified downloads.

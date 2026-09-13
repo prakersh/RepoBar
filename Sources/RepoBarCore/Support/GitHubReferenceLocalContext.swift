@@ -136,28 +136,10 @@ public enum GitHubReferenceLocalContext {
 
     public nonisolated static func gitHubRepositoryFullName(at path: String) -> String? {
         #if os(macOS)
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = ["git", "-C", path, "remote", "get-url", "origin"]
-            var environment = ProcessInfo.processInfo.environment
-            environment["GIT_TERMINAL_PROMPT"] = "0"
-            environment["GIT_OPTIONAL_LOCKS"] = "0"
-            process.environment = environment
+            guard let output = self.gitOutput(["remote", "get-url", "origin"], at: URL(fileURLWithPath: path)),
+                  output.terminationStatus == 0 else { return nil }
 
-            let output = Pipe()
-            process.standardOutput = output
-            process.standardError = Pipe()
-            do {
-                try process.run()
-            } catch {
-                return nil
-            }
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else { return nil }
-
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            let remote = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return self.gitHubRepositoryFullName(fromRemoteURL: remote)
+            return self.gitHubRepositoryFullName(fromRemoteURL: output.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
         #else
             nil
         #endif
@@ -193,24 +175,22 @@ public enum GitHubReferenceLocalContext {
     }
 
     private nonisolated static func localCommitExists(hash: String, at path: URL) -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git", "-C", path.path, "cat-file", "-e", "\(hash)^{commit}"]
-        var environment = ProcessInfo.processInfo.environment
-        environment["GIT_TERMINAL_PROMPT"] = "0"
-        environment["GIT_OPTIONAL_LOCKS"] = "0"
-        process.environment = environment
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-        } catch {
-            return false
-        }
-        process.waitUntilExit()
-        return process.terminationStatus == 0
+        #if os(macOS)
+            self.gitOutput(["cat-file", "-e", "\(hash)^{commit}"], at: path)?.terminationStatus == 0
+        #else
+            false
+        #endif
     }
+
+    #if os(macOS)
+        private nonisolated static func gitOutput(_ arguments: [String], at directory: URL) -> GitProcessOutput? {
+            var environment = ProcessInfo.processInfo.environment
+            environment["GIT_TERMINAL_PROMPT"] = "0"
+            environment["GIT_OPTIONAL_LOCKS"] = "0"
+            environment["GIT_NO_LAZY_FETCH"] = "1"
+            return try? GitProcessRunner.run(arguments, in: directory, environment: environment, timeout: 5)
+        }
+    #endif
 }
 
 private actor LocalRepositoryFullNameCache {

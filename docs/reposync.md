@@ -85,3 +85,7 @@ If bookmark is missing/stale: show “0 repos” until user re-chooses the folde
 Use the CLI to validate discovery without launching the app:
 - `repobar local --root ~/Projects --depth 4`
 - `repobar local --root ~/Projects --depth 4 --sync`
+
+## Reference Context
+
+Local path and commit probes run only on macOS. They use the same Git executable and file-backed process capture as Local Projects, with noninteractive local reads and a five-second bound. Other platforms skip the Git probe and continue normal reference parsing.

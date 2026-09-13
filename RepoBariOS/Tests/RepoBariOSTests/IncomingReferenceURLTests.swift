@@ -1,7 +1,28 @@
-import XCTest
+import RepoBarCore
 @testable import RepoBariOS
+import SwiftUI
+import XCTest
 
 final class IncomingReferenceURLTests: XCTestCase {
+    func testLocalGitProbeIsUnavailableOnIOS() {
+        XCTAssertNil(GitHubReferenceLocalContext.gitHubRepositoryFullName(at: "/tmp/synthetic-repository"))
+    }
+
+    func testWorkflowRunDisplay() throws {
+        let match = try GitHubReferenceMatch(
+            query: .repositoryWorkflowRun(repositoryFullName: "acme/widget", runID: 42),
+            title: "Fixture workflow",
+            url: XCTUnwrap(URL(string: "https://github.com/acme/widget/actions/runs/42")),
+            repositoryFullName: "acme/widget",
+            kind: .workflowRun,
+            state: nil,
+            createdAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        XCTAssertEqual(match.symbolName, "play.circle")
+        XCTAssertEqual(match.tint, .secondary)
+    }
+
     func testParsesResolveText() throws {
         let url = try XCTUnwrap(IncomingReferenceURL.makeURL(text: " openclaw/openclaw#123 "))
 
@@ -17,8 +38,8 @@ final class IncomingReferenceURLTests: XCTestCase {
         )
     }
 
-    func testRejectsNonResolveURLs() {
-        XCTAssertNil(IncomingReferenceURL.text(from: URL(string: "https://github.com/openclaw/openclaw/issues/1")!))
-        XCTAssertNil(IncomingReferenceURL.text(from: URL(string: "repobar://settings")!))
+    func testRejectsNonResolveURLs() throws {
+        XCTAssertNil(try IncomingReferenceURL.text(from: XCTUnwrap(URL(string: "https://github.com/openclaw/openclaw/issues/1"))))
+        XCTAssertNil(try IncomingReferenceURL.text(from: XCTUnwrap(URL(string: "repobar://settings"))))
     }
 }
