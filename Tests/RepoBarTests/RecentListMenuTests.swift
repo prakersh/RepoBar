@@ -7,7 +7,7 @@ struct RecentListMenuTests {
     @MainActor
     @Test
     func `recent list cache evicts least recently used entry`() {
-        let cache = RecentListCache<Int>(maxEntries: 2)
+        let cache = RecentListCache<[Int]>(maxEntries: 2)
         let now = Date(timeIntervalSinceReferenceDate: 1000)
 
         cache.store([1], for: "one", fetchedAt: now)

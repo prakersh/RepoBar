@@ -10,16 +10,15 @@ final class RecentMenuService {
 
     private let github: @MainActor () -> GitHubClient
     private let cacheNamespace: @MainActor () -> String
-    private let recentIssuesCache = RecentListCache<RepoIssueSummary>()
-    private let recentPullRequestsCache = RecentListCache<RepoPullRequestSummary>()
-    private let recentReleasesCache = RecentListCache<RepoReleaseSummary>()
-    private let recentWorkflowRunsCache = RecentListCache<RepoWorkflowRunSummary>()
-    private let recentCommitsCache = RecentListCache<RepoCommitSummary>()
-    private let recentDiscussionsCache = RecentListCache<RepoDiscussionSummary>()
-    private let recentTagsCache = RecentListCache<RepoTagSummary>()
-    private let recentBranchesCache = RecentListCache<RepoBranchSummary>()
-    private let recentContributorsCache = RecentListCache<RepoContributorSummary>()
-    private var recentCommitCounts: [String: Int] = [:]
+    private let recentIssuesCache = RecentListCache<[RepoIssueSummary]>()
+    private let recentPullRequestsCache = RecentListCache<[RepoPullRequestSummary]>()
+    private let recentReleasesCache = RecentListCache<[RepoReleaseSummary]>()
+    private let recentWorkflowRunsCache = RecentListCache<[RepoWorkflowRunSummary]>()
+    private let recentCommitsCache = RecentListCache<RepoCommitList>()
+    private let recentDiscussionsCache = RecentListCache<[RepoDiscussionSummary]>()
+    private let recentTagsCache = RecentListCache<[RepoTagSummary]>()
+    private let recentBranchesCache = RecentListCache<[RepoBranchSummary]>()
+    private let recentContributorsCache = RecentListCache<[RepoContributorSummary]>()
 
     init(
         github: @escaping @MainActor () -> GitHubClient,
@@ -204,16 +203,13 @@ final class RecentMenuService {
 
     func cachedRecentCommitCount(fullName: String) -> Int? {
         let key = self.cacheKey(fullName: fullName)
-        if let total = self.recentCommitCounts[key] {
-            return total
-        }
-        return self.recentCommitsCache.stale(for: key)?.count
+        return self.recentCommitsCache.stale(for: key).map { $0.totalCount ?? $0.items.count }
     }
 
     func cachedCommits(fullName: String, now: Date = Date()) -> [RepoCommitSummary]? {
         let key = self.cacheKey(fullName: fullName)
-        return self.recentCommitsCache.cached(for: key, now: now, maxAge: self.cacheTTL)
-            ?? self.recentCommitsCache.stale(for: key)
+        return self.recentCommitsCache.cached(for: key, now: now, maxAge: self.cacheTTL)?.items
+            ?? self.recentCommitsCache.stale(for: key)?.items
     }
 
     func cachedCommitDigest(fullName: String) -> Int? {
@@ -235,29 +231,20 @@ final class RecentMenuService {
             headerIcon: "arrow.turn.down.right",
             emptyTitle: "No commits",
             cached: { key, now, ttl in
-                self.recentCommitsCache.cached(for: key, now: now, maxAge: ttl).map(RecentMenuItems.commits)
+                self.recentCommitsCache.cached(for: key, now: now, maxAge: ttl).map { RecentMenuItems.commits($0.items) }
             },
             stale: { key in
-                self.recentCommitsCache.stale(for: key).map(RecentMenuItems.commits)
+                self.recentCommitsCache.stale(for: key).map { RecentMenuItems.commits($0.items) }
             },
             needsRefresh: { key, now, ttl in
                 self.recentCommitsCache.needsRefresh(for: key, now: now, maxAge: ttl)
             },
             load: { key, owner, name, limit, github in
-                let task = self.recentCommitsCache.task(for: key) {
-                    let list = try await github.recentCommits(owner: owner, name: name, limit: limit)
-                    await MainActor.run {
-                        self.recentCommitCounts[key] = list.totalCount ?? list.items.count
-                    }
-                    return list.items
+                let list = try await self.recentCommitsCache.load(for: key, timeout: self.loadTimeout) {
+                    try await github.recentCommits(owner: owner, name: name, limit: limit)
                 }
-                defer { self.recentCommitsCache.clearInflight(for: key) }
-                let items = try await AsyncTimeout.value(within: self.loadTimeout, task: task)
-                let evictedKeys = self.recentCommitsCache.store(items, for: key, fetchedAt: Date())
-                for evictedKey in evictedKeys {
-                    self.recentCommitCounts[evictedKey] = nil
-                }
-                return RecentMenuItems.commits(items)
+                self.recentCommitsCache.store(list, for: key, fetchedAt: Date())
+                return RecentMenuItems.commits(list.items)
             }
         )
     }
@@ -282,11 +269,9 @@ final class RecentMenuService {
                 config.cache.needsRefresh(for: key, now: now, maxAge: ttl)
             },
             load: { key, owner, name, limit, github in
-                let task = config.cache.task(for: key) {
+                let items = try await config.cache.load(for: key, timeout: self.loadTimeout) {
                     try await fetch(github, owner, name, limit)
                 }
-                defer { config.cache.clearInflight(for: key) }
-                let items = try await AsyncTimeout.value(within: self.loadTimeout, task: task)
                 _ = config.cache.store(items, for: key, fetchedAt: Date())
                 return config.wrap(items)
             }
@@ -299,7 +284,7 @@ struct RecentMenuDescriptorConfig<Item: Sendable> {
     let headerTitle: String
     let headerIcon: String?
     let emptyTitle: String
-    let cache: RecentListCache<Item>
+    let cache: RecentListCache<[Item]>
     let wrap: ([Item]) -> RecentMenuItems
     let unwrap: (RecentMenuItems) -> [Item]?
     let fetch: @Sendable (GitHubClient, String, String, Int) async throws -> [Item]
@@ -353,84 +338,5 @@ enum RecentMenuItems {
         case let .branches(items): items.count
         case let .contributors(items): items.count
         }
-    }
-}
-
-final class RecentListCache<Item: Sendable> {
-    struct Entry {
-        var fetchedAt: Date
-        var items: [Item]
-    }
-
-    private let maxEntries: Int
-    private var entries: [String: Entry] = [:]
-    private var entryOrder: [String] = []
-    private var inflight: [String: Task<[Item], Error>] = [:]
-
-    init(maxEntries: Int = AppLimits.RecentLists.cacheEntries) {
-        self.maxEntries = max(0, maxEntries)
-    }
-
-    func cached(for key: String, now: Date, maxAge: TimeInterval) -> [Item]? {
-        guard let entry = self.entries[key] else { return nil }
-        guard now.timeIntervalSince(entry.fetchedAt) <= maxAge else { return nil }
-
-        self.touch(key)
-        return entry.items
-    }
-
-    func stale(for key: String) -> [Item]? {
-        guard let entry = self.entries[key] else { return nil }
-
-        self.touch(key)
-        return entry.items
-    }
-
-    func needsRefresh(for key: String, now: Date, maxAge: TimeInterval) -> Bool {
-        guard let entry = self.entries[key] else { return true }
-
-        return now.timeIntervalSince(entry.fetchedAt) > maxAge
-    }
-
-    func task(for key: String, factory: @escaping @Sendable () async throws -> [Item]) -> Task<[Item], Error> {
-        if let existing = self.inflight[key] {
-            return existing
-        }
-        let task = Task { try await factory() }
-        self.inflight[key] = task
-        return task
-    }
-
-    func clearInflight(for key: String) {
-        self.inflight[key] = nil
-    }
-
-    @discardableResult
-    func store(_ items: [Item], for key: String, fetchedAt: Date) -> [String] {
-        guard self.maxEntries > 0 else { return [] }
-
-        self.entries[key] = Entry(fetchedAt: fetchedAt, items: items)
-        self.touch(key)
-        return self.evictIfNeeded()
-    }
-
-    func count() -> Int {
-        self.entries.count
-    }
-
-    private func touch(_ key: String) {
-        self.entryOrder.removeAll { $0 == key }
-        self.entryOrder.append(key)
-    }
-
-    private func evictIfNeeded() -> [String] {
-        var evicted: [String] = []
-        while self.entries.count > self.maxEntries, let oldest = self.entryOrder.first {
-            self.entryOrder.removeFirst()
-            if self.entries.removeValue(forKey: oldest) != nil {
-                evicted.append(oldest)
-            }
-        }
-        return evicted
     }
 }

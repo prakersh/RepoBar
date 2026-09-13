@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Respect repository submenu timeouts, preserve requests needed by other menus, and allow retries after bounded cancellation cleanup.
 - **Compatibility:** Development tooling requires Node.js 22.13 or newer, matching the existing pnpm requirement; update pnpm to 11.26 and pin CI tooling with verified downloads.
 - Update SwiftLog to 1.15.1 and Zod to 4.6.2 for app logging and GraphQL developer tooling.
 
