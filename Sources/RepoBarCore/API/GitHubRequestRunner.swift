@@ -52,30 +52,16 @@ actor GitHubRequestRunner {
         let startedAt = Date()
         self.logger.debug("GET \(Self.logPath(for: url))")
         await self.diag.message("GET \(Self.logPath(for: url))")
-        if await self.etagCache.isRateLimited(), let until = await etagCache.rateLimitUntil() {
-            self.logger.warning("Blocked by local rate limit until \(until)")
-            await self.diag.message("Blocked by local rateLimit until \(until)")
-            throw GitHubAPIError.rateLimited(
-                until: until,
-                message: "GitHub rate limit hit; resets \(RelativeFormatter.string(from: until, relativeTo: Date()))."
-            )
-        }
-        if let cooldown = await backoff.cooldown(for: url) {
-            self.logger.warning("Cooldown active for \(Self.logPath(for: url)) until \(cooldown)")
-            await self.diag.message("Cooldown active for \(Self.logPath(for: url)) until \(cooldown)")
-            throw GitHubAPIError.serviceUnavailable(
-                retryAfter: cooldown,
-                message: Self.cooldownMessage(for: url, until: cooldown)
-            )
-        }
+        try await self.checkBudget(for: url)
 
         var request = Self.makeRequest(url: url, token: token, headers: headers, useETag: useETag)
         if useETag, let cached = await etagCache.cached(for: url) {
             request.addValue(cached.etag, forHTTPHeaderField: "If-None-Match")
         }
 
-        let (data, responseAny) = try await self.data(for: request, url: url)
-        guard let response = responseAny as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        let result = try await self.data(for: request, url: url)
+        let data = result.data
+        let response = result.response
 
         await self.logResponse("GET", url: url, response: response, startedAt: startedAt)
 
@@ -87,8 +73,7 @@ actor GitHubRequestRunner {
         }
 
         if status == 202 {
-            let retryAfter = self.retryAfterDate(from: response) ?? Date().addingTimeInterval(90)
-            await self.backoff.setCooldown(url: response.url ?? url, until: retryAfter)
+            let retryAfter = result.retryAt ?? Date().addingTimeInterval(90)
             let retryText = RelativeFormatter.string(from: retryAfter, relativeTo: Date())
             let message = "GitHub is generating repository stats; some numbers may be stale. RepoBar will retry \(retryText)."
             self.logger.warning("HTTP GET \(Self.logPath(for: url)) status=202 retryAfter=\(retryAfter)")
@@ -100,21 +85,11 @@ actor GitHubRequestRunner {
         }
 
         if status == 403 || status == 429 {
-            let remainingHeader = response.value(forHTTPHeaderField: "X-RateLimit-Remaining")
-            let remaining = Int(remainingHeader ?? "")
-
-            // If we still have quota, this 403 is likely permissions/abuse detection; surface it as a normal error.
-            if let remaining, remaining > 0 {
-                self.logger.warning("HTTP GET \(Self.logPath(for: url)) status=\(status) remaining=\(remaining)")
-                await self.diag.message("403 with remaining=\(remaining) on \(url.lastPathComponent); treating as bad status")
+            guard let resetDate = result.retryAt else {
+                self.logger.warning("HTTP GET \(Self.logPath(for: url)) status=\(status) without a rate-limit signal")
                 throw GitHubAPIError.badStatus(code: status, message: Self.statusMessage(for: status, data: data))
             }
 
-            let resetDate = self.rateLimitDate(from: response) ?? Date().addingTimeInterval(60)
-            self.lastRateLimitReset = resetDate
-            await self.etagCache.setRateLimitReset(date: resetDate)
-            self.lastRateLimitError = "GitHub rate limit hit; resets " +
-                "\(RelativeFormatter.string(from: resetDate, relativeTo: Date()))."
             self.logger.warning("HTTP GET \(Self.logPath(for: url)) rateLimited status=\(status) reset=\(resetDate)")
             await self.diag.message("Rate limited on \(url.lastPathComponent); resets \(resetDate)")
             throw GitHubAPIError.rateLimited(until: resetDate, message: self.lastRateLimitError ?? "Rate limited.")
@@ -136,7 +111,6 @@ actor GitHubRequestRunner {
         if let snapshot = RateLimitSnapshot.from(response: response) {
             self.latestRestRateLimit = snapshot
         }
-        self.detectRateLimit(from: response)
         return (data, response)
     }
 
@@ -162,13 +136,53 @@ actor GitHubRequestRunner {
         statusCode == 200
     }
 
-    private func data(for request: URLRequest, url: URL) async throws -> (Data, URLResponse) {
+    private func checkBudget(for url: URL) async throws {
+        if await self.etagCache.isRateLimited(), let until = await etagCache.rateLimitUntil() {
+            self.logger.warning("Blocked by local rate limit until \(until)")
+            await self.diag.message("Blocked by local rateLimit until \(until)")
+            throw GitHubAPIError.rateLimited(
+                until: until,
+                message: "GitHub rate limit hit; resets \(RelativeFormatter.string(from: until, relativeTo: Date()))."
+            )
+        }
+        if let cooldown = await backoff.cooldown(for: url) {
+            self.logger.warning("Cooldown active for \(Self.logPath(for: url)) until \(cooldown)")
+            await self.diag.message("Cooldown active for \(Self.logPath(for: url)) until \(cooldown)")
+            throw GitHubAPIError.serviceUnavailable(
+                retryAfter: cooldown,
+                message: Self.cooldownMessage(for: url, until: cooldown)
+            )
+        }
+    }
+
+    private func data(for request: URLRequest, url: URL) async throws -> GitHubHTTPResult {
         let limiter = self.limiter(for: url)
         await limiter.acquire()
         do {
-            let result = try await self.dataLoader.data(for: request)
+            try Task.checkCancellation()
+            try await self.checkBudget(for: url)
+            let (data, responseAny) = try await self.dataLoader.data(for: request)
+            guard let response = responseAny as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+
+            var retryAt = GitHubRateLimitPolicy.retryDate(response: response, data: data)
+            let budget = [retryAt, GitHubRateLimitPolicy.primaryResetDate(response: response)].compactMap(\.self).max()
+            if let reset = budget {
+                let until = max(self.lastRateLimitReset ?? reset, reset)
+                self.lastRateLimitReset = until
+                self.lastRateLimitError = "GitHub rate limit hit; resets \(RelativeFormatter.string(from: until, relativeTo: Date()))."
+                await self.etagCache.setRateLimitReset(date: until)
+                if retryAt != nil {
+                    retryAt = until
+                }
+            }
+            if response.statusCode == 202 {
+                let retry = GitHubRateLimitPolicy.retryAfterDate(response: response) ?? Date().addingTimeInterval(90)
+                let until = max(self.lastRateLimitReset ?? retry, retry)
+                await self.backoff.setCooldown(url: url, until: until)
+                retryAt = until
+            }
             await limiter.release()
-            return result
+            return GitHubHTTPResult(data: data, response: response, retryAt: retryAt)
         } catch {
             await limiter.release()
             throw error
@@ -192,11 +206,11 @@ actor GitHubRequestRunner {
 
     static func statusMessage(for status: Int, data: Data) -> String {
         let fallback = HTTPURLResponse.localizedString(forStatusCode: status)
-        guard let error = try? GitHubDecoding.decode(GitHubErrorResponse.self, from: data) else {
+        guard let error = try? GitHubDecoding.decode(GitHubErrorResponse.self, from: data), let message = error.message else {
             return "GitHub returned \(status): \(fallback)."
         }
 
-        var parts = [error.message]
+        var parts = [message]
         for detail in error.errors ?? [] {
             guard let message = detail.message?.trimmingCharacters(in: .whitespacesAndNewlines), message.isEmpty == false else {
                 continue
@@ -295,27 +309,6 @@ actor GitHubRequestRunner {
         return Date(timeIntervalSince1970: epoch)
     }
 
-    private func retryAfterDate(from response: HTTPURLResponse) -> Date? {
-        if let retryAfter = response.value(forHTTPHeaderField: "Retry-After"), let seconds = TimeInterval(retryAfter) {
-            return Date().addingTimeInterval(seconds)
-        }
-        return nil
-    }
-
-    private func detectRateLimit(from response: HTTPURLResponse) {
-        guard
-            let remainingText = response.value(forHTTPHeaderField: "X-RateLimit-Remaining"),
-            let remaining = Int(remainingText)
-        else { return }
-
-        if remaining <= 0 {
-            self.lastRateLimitReset = self.rateLimitDate(from: response)
-        } else if let reset = self.lastRateLimitReset, reset <= Date() {
-            self.lastRateLimitReset = nil
-            self.lastRateLimitError = nil
-        }
-    }
-
     private func detectRateLimit(from snapshot: RateLimitSnapshot) {
         guard let remaining = snapshot.remaining else { return }
 
@@ -381,15 +374,6 @@ actor GitHubRequestRunner {
             .joined(separator: "&")
         return "\(url.path)?\(query)"
     }
-}
-
-private struct GitHubErrorResponse: Decodable {
-    let message: String
-    let errors: [GitHubErrorDetail]?
-}
-
-private struct GitHubErrorDetail: Decodable {
-    let message: String?
 }
 
 struct RequestRunnerDiagnostics {

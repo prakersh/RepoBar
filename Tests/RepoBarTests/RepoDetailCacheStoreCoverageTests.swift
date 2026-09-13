@@ -7,6 +7,7 @@ struct RepoDetailCacheStoreCoverageTests {
     func `save then load round trips from disk`() throws {
         let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("RepoDetailCacheStoreCoverageTests.\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
 
         let store = RepoDetailCacheStore(baseURL: base)
         let apiHost = try #require(URL(string: "https://api.github.com"))
@@ -25,6 +26,7 @@ struct RepoDetailCacheStoreCoverageTests {
     func `load invalid JSON deletes cache file`() throws {
         let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("RepoDetailCacheStoreCoverageTests.invalid.\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
         let apiHost = try #require(URL(string: "https://api.github.com"))
         let store = RepoDetailCacheStore(baseURL: base)
 
@@ -45,6 +47,7 @@ struct RepoDetailCacheStoreCoverageTests {
     func `clear removes base directory`() throws {
         let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("RepoDetailCacheStoreCoverageTests.clear.\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
         let store = RepoDetailCacheStore(baseURL: base)
 
         let apiHost = try #require(URL(string: "https://api.github.com"))
@@ -60,6 +63,7 @@ struct RepoDetailCacheStoreCoverageTests {
     func `load missing file returns nil`() throws {
         let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("RepoDetailCacheStoreCoverageTests.missing.\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
         let store = RepoDetailCacheStore(baseURL: base)
         let apiHost = try #require(URL(string: "https://api.github.com"))
         #expect(store.load(apiHost: apiHost, owner: "me", name: "Repo") == nil)
@@ -69,6 +73,7 @@ struct RepoDetailCacheStoreCoverageTests {
     func `cache file uses fallback host when missing`() {
         let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("RepoDetailCacheStoreCoverageTests.hostless.\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
         let store = RepoDetailCacheStore(baseURL: base)
         let apiHost = URL(fileURLWithPath: "/tmp")
         store.save(RepoDetailCache(openPulls: 1), apiHost: apiHost, owner: "me", name: "Repo")
@@ -83,6 +88,7 @@ struct RepoDetailCacheStoreCoverageTests {
     func `save gracefully handles write failures`() throws {
         let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("RepoDetailCacheStoreCoverageTests.filebase.\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
 
         try Data("not a directory".utf8).write(to: base, options: .atomic)
         #expect(FileManager.default.fileExists(atPath: base.path) == true)

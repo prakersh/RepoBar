@@ -5,6 +5,7 @@ actor GraphQLClient {
     private var endpoint: URL = .init(string: "https://api.github.com/graphql")!
     private var tokenProvider: (@Sendable () async throws -> String)?
     private var rateLimit: RateLimitSnapshot?
+    private var blockedUntil: Date?
     private let responseCache: GraphQLResponseDiskCache?
     private let dataLoader: HTTPDataLoader
     private let responseCacheTTL: TimeInterval = 15 * 60
@@ -34,7 +35,12 @@ actor GraphQLClient {
         } else {
             components?.path = "/graphql"
         }
-        self.endpoint = components?.url ?? self.endpoint
+        let endpoint = components?.url ?? self.endpoint
+        if endpoint != self.endpoint {
+            self.blockedUntil = nil
+            self.rateLimit = nil
+        }
+        self.endpoint = endpoint
     }
 
     func setTokenProvider(_ provider: @Sendable @escaping () async throws -> String) {
@@ -73,10 +79,9 @@ actor GraphQLClient {
         request.addValue("bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = bodyData
 
-        let data: Data
-        let response: URLResponse
+        let result: GitHubHTTPResult
         do {
-            (data, response) = try await self.data(for: request)
+            result = try await self.data(for: request)
         } catch {
             if let stale = self.responseCache?.stale(key: cacheKey) {
                 await self.diag.message("GraphQL RepoSummary \(owner)/\(name) using stale cache after \(error.userFacingMessage)")
@@ -84,12 +89,10 @@ actor GraphQLClient {
             }
             throw error
         }
-        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        let data = result.data
+        let http = result.response
 
         await self.logGraphQLResponse(http, label: "RepoSummary", startedAt: startedAt)
-        if let snapshot = RateLimitSnapshot.from(response: http) {
-            self.rateLimit = snapshot
-        }
         guard http.statusCode == 200 else {
             await self.diag.message("GraphQL status \(http.statusCode) for \(owner)/\(name)")
             if let stale = self.responseCache?.stale(key: cacheKey), Self.canUseStaleCache(for: http.statusCode) {
@@ -99,7 +102,7 @@ actor GraphQLClient {
             if http.statusCode == 401 {
                 throw URLError(.userAuthenticationRequired)
             }
-            throw self.graphQLError(response: http)
+            throw self.graphQLError(response: http, data: data, retryAt: result.retryAt)
         }
 
         self.responseCache?.save(key: cacheKey, endpoint: self.endpoint, operation: "RepoSummary", body: bodyData, responseBody: data)
@@ -168,10 +171,9 @@ actor GraphQLClient {
         request.addValue("bearer \(token)", forHTTPHeaderField: "Authorization")
         request.httpBody = bodyData
 
-        let data: Data
-        let response: URLResponse
+        let result: GitHubHTTPResult
         do {
-            (data, response) = try await self.data(for: request)
+            result = try await self.data(for: request)
         } catch {
             if let stale = self.responseCache?.stale(key: cacheKey) {
                 await self.diag.message("GraphQL UserContributions \(login) using stale cache after \(error.userFacingMessage)")
@@ -179,12 +181,10 @@ actor GraphQLClient {
             }
             throw error
         }
-        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        let data = result.data
+        let http = result.response
 
         await self.logGraphQLResponse(http, label: "UserContributions", startedAt: startedAt)
-        if let snapshot = RateLimitSnapshot.from(response: http) {
-            self.rateLimit = snapshot
-        }
         guard http.statusCode == 200 else {
             await self.diag.message("GraphQL status \(http.statusCode) for contributions \(login)")
             if let stale = self.responseCache?.stale(key: cacheKey), Self.canUseStaleCache(for: http.statusCode) {
@@ -194,7 +194,7 @@ actor GraphQLClient {
             if http.statusCode == 401 {
                 throw URLError(.userAuthenticationRequired)
             }
-            throw self.graphQLError(response: http)
+            throw self.graphQLError(response: http, data: data, retryAt: result.retryAt)
         }
 
         self.responseCache?.save(key: cacheKey, endpoint: self.endpoint, operation: "UserContributions", body: bodyData, responseBody: data)
@@ -244,12 +244,35 @@ actor GraphQLClient {
         )
     }
 
-    private func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+    private func checkBudget() throws {
+        if let until = self.blockedUntil, until > Date() {
+            throw GitHubAPIError.rateLimited(until: until, message: "GitHub GraphQL rate limit hit.")
+        }
+        self.blockedUntil = nil
+    }
+
+    private func data(for request: URLRequest) async throws -> GitHubHTTPResult {
+        try self.checkBudget()
         await self.requestLimiter.acquire()
         do {
-            let result = try await self.dataLoader.data(for: request)
+            try Task.checkCancellation()
+            try self.checkBudget()
+            let (data, responseAny) = try await self.dataLoader.data(for: request)
+            guard let response = responseAny as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+
+            if request.url == self.endpoint, let snapshot = RateLimitSnapshot.from(response: response) {
+                self.rateLimit = snapshot
+            }
+            let retryAt = GitHubRateLimitPolicy.graphQLRetryDate(response: response, data: data)
+            let budget = [retryAt, GitHubRateLimitPolicy.primaryResetDate(response: response)].compactMap(\.self).max()
+            if let budget, request.url == self.endpoint {
+                self.blockedUntil = max(self.blockedUntil ?? budget, budget)
+            }
+            if response.statusCode == 200, let retryAt {
+                throw GitHubAPIError.rateLimited(until: retryAt, message: "GitHub GraphQL rate limit hit.")
+            }
             await self.requestLimiter.release()
-            return result
+            return GitHubHTTPResult(data: data, response: response, retryAt: retryAt)
         } catch {
             await self.requestLimiter.release()
             throw error
@@ -261,13 +284,12 @@ actor GraphQLClient {
         return "\(self.endpoint.absoluteString)\t\(operation)\t\(body)"
     }
 
-    private func graphQLError(response: HTTPURLResponse) -> Error {
+    private func graphQLError(response: HTTPURLResponse, data: Data, retryAt: Date?) -> Error {
         if response.statusCode == 403 || response.statusCode == 429 {
-            let reset = RateLimitSnapshot.from(response: response)?.reset
-            return GitHubAPIError.rateLimited(
-                until: reset,
-                message: "GitHub GraphQL rate limit hit."
-            )
+            if let retryAt {
+                return GitHubAPIError.rateLimited(until: retryAt, message: "GitHub GraphQL rate limit hit.")
+            }
+            return GitHubAPIError.badStatus(code: response.statusCode, message: GitHubRequestRunner.statusMessage(for: response.statusCode, data: data))
         }
         if response.statusCode == 502 || response.statusCode == 503 || response.statusCode == 504 {
             return GitHubAPIError.serviceUnavailable(

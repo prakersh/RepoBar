@@ -27,6 +27,10 @@ or infer settings from gitcrawl or any other crawler's config file.
 
 Recent-list menus stop waiting after 12 seconds. Each caller has its own deadline; a shared request is cancelled only when its last waiter leaves. Cancelled requests retain their timeout state during a 12-second cleanup window, so immediate retries do not start duplicate work. Completion clears the request sooner; otherwise the cache retires it after that window and permits a fresh request. Late results cannot clear or publish into a newer request.
 
+## Rate-Limit Backoff
+
+REST and GraphQL distinguish primary quota exhaustion from secondary throttling. `Retry-After` supports seconds and HTTP dates; an exhausted primary quota also waits for its reset. Secondary limits without a retry header wait at least one minute. Queued requests recheck the budget before starting network work, and ordinary permission failures do not create a quota cooldown.
+
 ## RepoBar-Owned Configuration
 
 RepoBar stores archive sources in `UserSettings.githubArchives`. The app and CLI

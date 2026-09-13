@@ -19,17 +19,16 @@ struct ActionsUsageInfoTests {
     }
 
     @Test
-    func `current month minutes bucket date only rows in UTC`() throws {
-        let previousTimeZone = NSTimeZone.default
-        NSTimeZone.default = try #require(TimeZone(secondsFromGMT: -8))
-        defer { NSTimeZone.default = previousTimeZone }
-
-        let usage = ActionsUsageInfo(
-            items: [Self.item(date: "2026-05-01", quantity: 12)],
-            fetchedAt: Self.date("2026-05-01T12:00:00Z")
-        )
-
-        #expect(usage.minutesUsedInCurrentMonth(now: Self.date("2026-05-01T12:00:00Z")) == 12)
+    func `current month minutes bucket date only rows in UTC`() async {
+        // Keep process-wide time-zone changes out of concurrent date/cache tests.
+        await #expect(processExitsWith: .success) {
+            NSTimeZone.default = try #require(TimeZone(secondsFromGMT: -8 * 3600))
+            let usage = ActionsUsageInfo(
+                items: [ActionsUsageInfoTests.item(date: "2026-05-01", quantity: 12)],
+                fetchedAt: ActionsUsageInfoTests.date("2026-05-01T12:00:00Z")
+            )
+            try #require(usage.minutesUsedInCurrentMonth(now: ActionsUsageInfoTests.date("2026-05-01T12:00:00Z")) == 12)
+        }
     }
 
     @Test

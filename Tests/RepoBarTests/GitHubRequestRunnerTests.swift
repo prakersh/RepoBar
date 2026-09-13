@@ -201,6 +201,159 @@ struct GitHubRequestRunnerTests {
         #expect(path.contains("secret") == false)
     }
 
+    @Test(arguments: [403, 429])
+    func `secondary limits honor Retry After despite remaining primary quota`(status: Int) async throws {
+        let url = try #require(URL(string: "https://api.github.com/repos/owner/repo/issues"))
+        let transport = StubHTTPTransport(responses: [Self.response(
+            url: url, status: status,
+            headers: ["X-RateLimit-Remaining": "42", "X-RateLimit-Reset": "\(Int(Date().addingTimeInterval(3600).timeIntervalSince1970))", "Retry-After": "120"],
+            body: #"{"message":"You have exceeded a secondary rate limit."}"#
+        )])
+        let runner = GitHubRequestRunner(etagCache: ETagCache(), dataLoader: HTTPDataLoader { try await transport.data(for: $0) })
+        for _ in 0 ..< 2 {
+            do {
+                _ = try await runner.get(url: url, token: "token")
+                Issue.record("Expected secondary rate limit")
+            } catch let GitHubAPIError.rateLimited(until, _) {
+                let until = try #require(until)
+                #expect((100 ... 130).contains(until.timeIntervalSinceNow))
+            }
+        }
+        #expect(await transport.requests.count == 1)
+    }
+
+    @Test(arguments: [200, 429])
+    func `GraphQL secondary limits stop repeat requests`(status: Int) async throws {
+        let url = try #require(URL(string: "https://api.github.com/graphql"))
+        let transport = StubHTTPTransport(responses: [Self.response(
+            url: url, status: status,
+            headers: ["X-RateLimit-Remaining": "42", "X-RateLimit-Reset": "\(Int(Date().addingTimeInterval(3600).timeIntervalSince1970))", "Retry-After": "120"],
+            body: #"{"errors":[{"type":"RATE_LIMITED","message":"You have exceeded a secondary rate limit."}]}"#
+        )])
+        let client = GraphQLClient(responseCache: nil, dataLoader: HTTPDataLoader { try await transport.data(for: $0) })
+        await client.setTokenProvider { "token" }
+        for _ in 0 ..< 2 {
+            do {
+                _ = try await client.repoSummary(owner: "owner", name: "repo")
+                Issue.record("Expected GraphQL rate limit")
+            } catch let GitHubAPIError.rateLimited(until, _) {
+                let until = try #require(until)
+                #expect((100 ... 130).contains(until.timeIntervalSinceNow))
+            }
+        }
+        #expect(await transport.requests.count == 1)
+    }
+
+    @Test
+    func `permission errors without quota headers do not throttle later requests`() async throws {
+        let url = try #require(URL(string: "https://api.github.com/repos/owner/repo/issues"))
+        let transport = StubHTTPTransport(responses: [
+            Self.response(url: url, status: 403, body: #"{"message":"Resource not accessible"}"#),
+            Self.response(url: url, status: 200, body: "allowed")
+        ])
+        let runner = GitHubRequestRunner(etagCache: ETagCache(), dataLoader: HTTPDataLoader { try await transport.data(for: $0) })
+        do {
+            _ = try await runner.get(url: url, token: "token")
+            Issue.record("Expected permission failure")
+        } catch let GitHubAPIError.badStatus(code, _) {
+            #expect(code == 403)
+        }
+        let result = try await runner.get(url: url, token: "token")
+        #expect(String(bytes: result.0, encoding: .utf8) == "allowed")
+        #expect(await transport.requests.count == 2)
+    }
+
+    @Test
+    func `redirected stats cooldown uses the requested URL`() async throws {
+        let url = try #require(URL(string: "https://api.github.com/repos/owner/old/stats/commit_activity"))
+        let redirected = try #require(URL(string: "https://api.github.com/repos/owner/new/stats/commit_activity"))
+        let transport = StubHTTPTransport(responses: [Self.response(url: redirected, status: 202, headers: ["Retry-After": "120"], body: "")])
+        let runner = GitHubRequestRunner(etagCache: ETagCache(), dataLoader: HTTPDataLoader { try await transport.data(for: $0) })
+        for _ in 0 ..< 2 {
+            do {
+                _ = try await runner.get(url: url, token: "token")
+                Issue.record("Expected stats cooldown")
+            } catch let GitHubAPIError.serviceUnavailable(until, _) {
+                #expect(until != nil)
+            }
+        }
+        #expect(await transport.requests.count == 1)
+    }
+
+    @Test
+    func `queued search requests recheck the rate budget before admission`() async throws {
+        let url = try #require(URL(string: "https://api.github.com/search/issues?q=repo:owner/repo"))
+        let response = Self.response(url: url, status: 429, headers: ["X-RateLimit-Remaining": "42", "Retry-After": "120"], body: #"{"message":"Secondary rate limit"}"#)
+        let transport = StubHTTPTransport(responses: Array(repeating: response, count: 12))
+        let runner = GitHubRequestRunner(etagCache: ETagCache(), dataLoader: HTTPDataLoader { try await transport.data(for: $0) })
+        let limited = await withTaskGroup(of: Bool.self) { group in
+            for _ in 0 ..< 12 {
+                group.addTask {
+                    do {
+                        _ = try await runner.get(url: url, token: "token")
+                        return false
+                    } catch GitHubAPIError.rateLimited {
+                        return true
+                    } catch {
+                        return false
+                    }
+                }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
+        #expect(limited.count == 12 && limited.allSatisfy(\.self))
+        #expect(await transport.requests.count == 1)
+    }
+
+    @Test
+    func `successful GraphQL response exhausts budget without discarding its data`() async throws {
+        let url = try #require(URL(string: "https://api.github.com/graphql"))
+        let transport = StubHTTPTransport(responses: [Self.response(
+            url: url, status: 200,
+            headers: ["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "\(Int(Date().addingTimeInterval(120).timeIntervalSince1970))"],
+            body: #"{"data":{"repository":{"issues":{"totalCount":1},"pullRequests":{"totalCount":2},"latestRelease":null}}}"#
+        )])
+        let client = GraphQLClient(responseCache: nil, dataLoader: HTTPDataLoader { try await transport.data(for: $0) })
+        await client.setTokenProvider { "token" }
+        let summary = try await client.repoSummary(owner: "owner", name: "repo")
+        #expect(summary.openIssues == 1 && summary.openPulls == 2)
+        do {
+            _ = try await client.repoSummary(owner: "owner", name: "repo")
+            Issue.record("Expected exhausted quota")
+        } catch GitHubAPIError.rateLimited {}
+        #expect(await transport.requests.count == 1)
+    }
+
+    @Test
+    func `successful final REST request stops queued work at exhausted quota`() async throws {
+        let url = try #require(URL(string: "https://api.github.com/search/issues?q=repo:owner/repo"))
+        let response = Self.response(
+            url: url, status: 200,
+            headers: ["X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "\(Int(Date().addingTimeInterval(120).timeIntervalSince1970))"],
+            body: "allowed"
+        )
+        let transport = StubHTTPTransport(responses: Array(repeating: response, count: 12))
+        let runner = GitHubRequestRunner(etagCache: ETagCache(), dataLoader: HTTPDataLoader { try await transport.data(for: $0) })
+        let successes = await withTaskGroup(of: Int.self) { group in
+            for _ in 0 ..< 12 {
+                group.addTask {
+                    do {
+                        _ = try await runner.get(url: url, token: "token")
+                        return 1
+                    } catch GitHubAPIError.rateLimited {
+                        return 0
+                    } catch {
+                        Issue.record(error)
+                        return 0
+                    }
+                }
+            }
+            return await group.reduce(0, +)
+        }
+        #expect(successes == 1)
+        #expect(await transport.requests.count == 1)
+    }
+
     private static func response(
         url: URL,
         status: Int,

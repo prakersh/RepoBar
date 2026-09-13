@@ -88,3 +88,13 @@ struct RepoErrorAccumulator {
         }
     }
 }
+
+struct GitHubErrorResponse: Decodable {
+    let message: String?
+    let errors: [GitHubErrorDetail]?
+}
+
+struct GitHubErrorDetail: Decodable {
+    let message: String?
+    let type: String?
+}
